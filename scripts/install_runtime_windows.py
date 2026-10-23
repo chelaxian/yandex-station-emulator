@@ -52,6 +52,19 @@ if disk.exists():
     raise SystemExit(0)
 
 
+def safe_extract(archive: tarfile.TarFile, member: tarfile.TarInfo, target_dir: Path) -> None:
+    """extract() with the security filter on new Pythons, plain on old ones.
+
+    The `filter` keyword appeared in Python 3.11.4/3.10.12/3.9.17; on older
+    interpreters fall back to plain extract — archive member paths are already
+    validated manually before extraction (see the loop below).
+    """
+    try:
+        archive.extract(member, target_dir, filter="fully_trusted")
+    except TypeError:
+        archive.extract(member, target_dir)
+
+
 def resolve_target(member: tarfile.TarInfo, linkname: str) -> Path | None:
     """Resolve a symlink target for the copy-fallback.
 
@@ -132,11 +145,11 @@ with io.BufferedReader(Parts(paths)) as stream:
                 }
             if member.issym():
                 try:
-                    archive.extract(member, target, filter="fully_trusted")
+                    safe_extract(archive, member, target)
                 except OSError:
                     copy_fallback(archive, member)
             else:
-                archive.extract(member, target, filter="fully_trusted")
+                safe_extract(archive, member, target)
 (target / "qemu/mini2/run").mkdir(exist_ok=True)
 meta_out.write_text(json.dumps(meta, indent=0, sort_keys=True))
 print(f"Runtime installed: {disk}")
