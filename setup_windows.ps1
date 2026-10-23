@@ -33,12 +33,21 @@ function Invoke-Py([string[]]$ScriptArgs) {
 }
 
 # --------------------------------------------------------------- qemu
-$qemu = Get-Command qemu-system-aarch64.exe -ErrorAction SilentlyContinue
+# QEMU_BIN env var wins; common install dirs are probed so QEMU can live on
+# any drive (D:\qemu etc.) — useful when C: is out of space.
+$qemu = $env:QEMU_BIN
+if ($qemu -and -not (Test-Path $qemu)) { throw "QEMU_BIN указан, но файла нет: $qemu" }
+if (-not $qemu) { $qemu = Get-Command qemu-system-aarch64.exe -ErrorAction SilentlyContinue }
 if (-not $qemu) {
-    foreach ($c in @("C:\Program Files\qemu\qemu-system-aarch64.exe", "C:\Program Files\qemu64\qemu-system-aarch64.exe")) {
-        if (Test-Path $c) { $qemu = $c; break }
+    $drives = @("C:", "D:", "E:")
+    foreach ($d in $drives) {
+        foreach ($c in @("$d\Program Files\qemu\qemu-system-aarch64.exe", "$d\qemu\qemu-system-aarch64.exe", "$d\Program Files\qemu64\qemu-system-aarch64.exe")) {
+            if (Test-Path $c) { $qemu = $c; break }
+        }
+        if ($qemu) { break }
     }
 }
+if ($qemu) { $env:QEMU_BIN = "$qemu" }
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
             ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $qemu) {
