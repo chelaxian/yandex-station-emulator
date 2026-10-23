@@ -50,7 +50,7 @@ a fatal missing GPIO 419. Both interfaces are now provided at boot. The actual
 platformd process opens /tmp/mac-microphone.pcm and continuously consumes PCM.
 The stock sound_initd receiver is active in init mode 1 with 320-sample frames.
 The first user acoustic test preceded this fix and decoded no packet. A repeat
-test has been requested. Temporary audio tracing and WebSocket experiments have
+test after the fix also produced no accepted setup packet. Temporary audio tracing and WebSocket experiments have
 been removed from the generated launch configuration.
 
 PEM keys stay in guest RAM; temporary host staging files are deleted after boot.
