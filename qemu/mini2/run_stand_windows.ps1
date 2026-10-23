@@ -66,7 +66,7 @@ if (-not $ok) {
     exit 1
 }
 
-# LED bridge: started by server_windows.py (ensure_led_bridge) — starting a
+# LED bridge: started by server_windows.py (ensure_led_bridge) - starting a
 # second copy here would fight over TCP 19095 and overwrite the pid file.
 
 # host helper (mic PCM 19093 + PEM/epoch HTTP 19094)
@@ -84,4 +84,4 @@ try {
     }
 } catch { Write-Host "[stand] boot request failed: $_" }
 
-Write-Host "[stand] OK → http://127.0.0.1:8765/" -ForegroundColor Green
+Write-Host "[stand] OK -> http://127.0.0.1:8765/" -ForegroundColor Green
