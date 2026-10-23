@@ -1,5 +1,8 @@
 # Windows port of run_stand.sh: viewer + LED bridge + host helper + QEMU.
 # Usage:  powershell -ExecutionPolicy Bypass -File run_stand_windows.ps1
+# UTF-8 console: python children print UTF-8, PS defaults to CP866/1251
+chcp 65001 > $null
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 $ErrorActionPreference = "Stop"
 $Dir   = Split-Path -Parent $MyInvocation.MyCommand.Path

@@ -1,6 +1,9 @@
 # Windows setup for the Yandex Station Mini 2 emulator (port of setup_macos.sh).
 # Usage:  powershell -ExecutionPolicy Bypass -File setup_windows.ps1
 # Requires: Windows 10/11 x64, ~4 GB free disk space, internet access.
+# UTF-8 console: python children print UTF-8, PS defaults to CP866/1251
+chcp 65001 > $null
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 $ErrorActionPreference = "Stop"
 $Repo = Split-Path -Parent $MyInvocation.MyCommand.Path

@@ -1,5 +1,8 @@
 # Stop the Windows stand: QEMU, viewer, LED bridge, host helper.
 # Usage:  powershell -ExecutionPolicy Bypass -File scripts\stop_windows.ps1
+# UTF-8 console: python children print UTF-8, PS defaults to CP866/1251
+chcp 65001 > $null
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 $ErrorActionPreference = "Continue"
 $Repo = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
