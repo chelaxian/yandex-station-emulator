@@ -1,0 +1,169 @@
+#!/bin/sh
+# Windows port of the Mini 2 guest bootstrap.
+# Differences from mini2.start: no 9p mounts (QEMU Windows has no virtfs),
+# the LED sysfs lives in a guest tmpfs and is streamed to the host panel
+# over TCP 10.0.2.2:19095, and PEM keys are fetched from the host helper
+# at http://10.0.2.2:19094 instead of being staged through the 9p share.
+set -eu
+mkdir -p /tmp /run /mini2 /mnt/leds
+mount -t tmpfs -o mode=1777 tmpfs /tmp
+mount -t tmpfs tmpfs /run
+mkdir -p /dev/shm /dev/pts
+mount -t tmpfs -o mode=1777 tmpfs /dev/shm
+mount -t devpts devpts /dev/pts
+modprobe virtio_blk
+modprobe virtio_net
+modprobe ext4
+modprobe virtio_snd || true
+modprobe bluetooth || true
+modprobe hci_vhci || true
+
+# clock: QEMU RTC already carries host time; the helper epoch refresh
+# happens after the network setup below
+
+# fake LED sysfs — used to be a 9p share, now tmpfs + TCP stream to the host
+mount -t tmpfs tmpfs /mnt/leds
+for i in 1 2 3 4 5 6; do
+  for color in red green blue; do
+    mkdir -p "/mnt/leds/mini2:$color:ring$i"
+    printf '0\n' >"/mnt/leds/mini2:$color:ring$i/brightness"
+    printf '255\n' >"/mnt/leds/mini2:$color:ring$i/max_brightness"
+    printf '0\n' >"/mnt/leds/mini2:$color:ring$i/brightness_scale"
+  done
+done
+for d in 1 2 3 4; do
+  for s in A B C D E F G; do
+    mkdir -p "/mnt/leds/mini2:white:clock$s$d"
+    printf '0\n' >"/mnt/leds/mini2:white:clock$s$d/brightness"
+    printf '255\n' >"/mnt/leds/mini2:white:clock$s$d/max_brightness"
+    printf '0\n' >"/mnt/leds/mini2:white:clock$s$d/brightness_scale"
+  done
+done
+for loc in PLUS1 PLUS2 PLUS3 PLUS4 MINUS DEGREE; do
+  mkdir -p "/mnt/leds/mini2:white:clock$loc"
+  printf '0\n' >"/mnt/leds/mini2:white:clock$loc/brightness"
+  printf '255\n' >"/mnt/leds/mini2:white:clock$loc/max_brightness"
+  printf '0\n' >"/mnt/leds/mini2:white:clock$loc/brightness_scale"
+done
+
+mount /dev/vda /mini2
+if [ -b /dev/vdb ]; then
+    modprobe vfat
+    mount -t vfat -o ro /dev/vdb /mini2/tee
+fi
+mount -t proc proc /mini2/proc
+mount --bind /etc/fake_cmdline /mini2/proc/cmdline
+mount --rbind /dev /mini2/dev
+mount -t tmpfs -o mode=1777 tmpfs /mini2/tmp
+mount -t tmpfs tmpfs /mini2/run
+# Keep real kernel sysfs available except the physical column's LED class.
+mount -t tmpfs tmpfs /mini2/sys
+for entry in /sys/*; do
+    name=${entry##*/}
+    [ "$name" = class ] && continue
+    [ -d "$entry" ] || continue
+    mkdir -p "/mini2/sys/$name"
+    mount --bind "$entry" "/mini2/sys/$name"
+done
+mkdir -p /mini2/sys/class/leds
+for entry in /sys/class/*; do
+    name=${entry##*/}
+    [ "$name" = leds ] && continue
+    mkdir -p "/mini2/sys/class/$name"
+    mount --bind "$entry" "/mini2/sys/class/$name"
+done
+mount --bind /mnt/leds /mini2/sys/class/leds
+# The firmware enables its microphone circuitry through Amlogic GPIO 414
+# before opening capture. Provide that register interface on the virt board.
+for gpio in 414 419; do
+    mkdir -p "/mini2/tmp/mic-gpio/gpio$gpio"
+    printf 'in\n' >"/mini2/tmp/mic-gpio/gpio$gpio/direction"
+    printf '1\n' >"/mini2/tmp/mic-gpio/gpio$gpio/value"
+done
+touch /mini2/tmp/mic-gpio/export /mini2/tmp/mic-gpio/unexport
+mkdir -p /mini2/sys/class/gpio
+mount --bind /mini2/tmp/mic-gpio /mini2/sys/class/gpio
+ip link set lo up
+# Keep the firmware's expected interface name; the transport is VirtIO Ethernet.
+network_if=eth0
+control_if=eth1
+for device in /sys/class/net/*; do
+    case "$(cat "$device/address" 2>/dev/null)" in
+        52:54:00:4d:32:01) network_if=${device##*/} ;;
+        52:54:00:4d:32:02) control_if=${device##*/} ;;
+    esac
+done
+ip link set "$network_if" name wlan0
+ip link set wlan0 up
+ip addr add 10.0.2.15/24 dev wlan0
+ip route add default via 10.0.2.2
+printf 'nameserver 10.0.2.3\n' >/etc/resolv.conf
+printf 'nameserver 10.0.2.3\n' >/mini2/etc/resolv.conf
+
+# clock + PEM keys: fetched from the host helper over the NAT gateway
+# (10.0.2.2 reaches the host loopback) — must run after the network setup
+if wget -q -T 3 -O /tmp/host_epoch http://10.0.2.2:19094/epoch 2>/dev/null; then
+    date -u -s "@$(cat /tmp/host_epoch)" >/dev/null 2>&1 || true
+fi
+mkdir -p /opt/mini2/pem-keys
+chmod 700 /opt/mini2/pem-keys
+if wget -q -T 3 -O /opt/mini2/pem-keys/private.pem http://10.0.2.2:19094/keys/private.pem 2>/dev/null &&
+   wget -q -T 3 -O /opt/mini2/pem-keys/public.pem http://10.0.2.2:19094/keys/public.pem 2>/dev/null; then
+  chmod 600 /opt/mini2/pem-keys/private.pem /opt/mini2/pem-keys/public.pem
+  echo 'PEM keys fetched from host helper' >/tmp/pem-fetch.log
+else
+  rm -f /opt/mini2/pem-keys/private.pem /opt/mini2/pem-keys/public.pem
+  echo 'PEM keys not available' >/tmp/pem-fetch.log
+fi
+
+echo 1 >/proc/sys/vm/overcommit_memory
+echo 'Mini 2: original firmware rootfs mounted; starting Alice services'
+mkdir -p /mini2/emulator
+cp /opt/mini2/alice-start.sh /mini2/emulator/alice-start.sh
+cp /opt/mini2/launch.json /mini2/emulator/launch.json
+cp /opt/mini2/asound.conf /mini2/etc/asound.conf
+cp /opt/mini2/btvirt /mini2/emulator/btvirt
+cp /opt/mini2/wpa-wired.conf /mini2/emulator/wpa-wired.conf
+if [ -f /opt/mini2/mic_relay ]; then
+    cp /opt/mini2/mic_relay /mini2/tmp/mic_relay
+    chmod 755 /mini2/tmp/mic_relay
+fi
+if [ -f /opt/mini2/pem-keys/private.pem ] && [ -f /opt/mini2/pem-keys/public.pem ] && [ -f /opt/mini2/pem_proxy ]; then
+    cp /opt/mini2/pem_proxy /mini2/tmp/pem_proxy
+    chmod 755 /mini2/tmp/pem_proxy
+    cp /opt/mini2/pem-keys/*.pem /mini2/tmp/
+    chmod 600 /mini2/tmp/private.pem /mini2/tmp/public.pem
+    rm -f /opt/mini2/pem-keys/private.pem /opt/mini2/pem-keys/public.pem
+fi
+chroot /mini2 /bin/sh /emulator/alice-start.sh >/mini2/tmp/alice-launcher.log 2>&1 &
+
+echo $! >/run/alice-launcher.pid
+/bin/sh /opt/mini2/status.sh >/tmp/firmware-status.log 2>&1 &
+echo $! >/run/firmware-status.pid
+
+# LED stream: push fake sysfs values + firmware status to the host panel.
+# Host led_bridge_windows.py listens on 10.0.2.2:19095 (loopback-only NAT).
+# NB: busybox ash aborts a subshell on a failed redirection — never use
+# `read <file` here without an existence check; use $(cat) instead.
+(
+  while true; do
+    {
+      while true; do
+        for d in /mnt/leds/mini2:*; do
+          if [ -r "$d/brightness" ]; then
+            v=$(cat "$d/brightness" 2>/dev/null)
+            if [ -n "$v" ]; then printf '%s %s\n' "${d##*/}" "$v"; fi
+          fi
+        done
+        if [ -r /mnt/leds/.firmware-status.json ]; then
+          s=$(cat /mnt/leds/.firmware-status.json 2>/dev/null)
+          if [ -n "$s" ]; then printf 'status %s\n' "$s"; fi
+        fi
+        echo .
+        sleep 0.2
+      done
+    } | nc 10.0.2.2 19095 >/dev/null 2>&1
+    sleep 1
+  done
+) >/var/log/led-agent.log 2>&1 &
+echo $! >/run/led-agent.pid

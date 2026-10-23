@@ -21,3 +21,5 @@ qemu/mini2/optee/run/
 qemu/mini2/optee/*.gz
 qemu/mini2/optee/*.deb
 qemu/mini2/optee/*.log
+qemu/stand/data/
+qemu/stand/run/

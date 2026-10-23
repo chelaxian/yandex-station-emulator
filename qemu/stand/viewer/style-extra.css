@@ -1,0 +1,60 @@
+/* Extra styles for the two-model stand: switcher + MIDI scene. */
+
+.model-switch {
+  display: flex;
+  gap: 3px;
+  background: #ffffff05;
+  border: 1px solid #ffffff0d;
+  border-radius: 8px;
+  padding: 3px;
+  margin-right: 4px;
+}
+.model-tab {
+  font: inherit;
+  font-size: 9px;
+  letter-spacing: .2px;
+  color: #7d7589;
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+  transition: .15s;
+}
+.model-tab:hover { color: #c8bcd8; }
+.model-tab.active { color: #ece4f8; background: #2b2239; }
+
+.midi {
+  position: relative;
+  width: min(360px, 88vw);
+  filter: drop-shadow(0 28px 40px #0009);
+  --midi-c: #8b5cf6;
+}
+.midi-svg { width: 100%; height: auto; display: block; }
+.midi-ring-glow { fill: var(--midi-c); opacity: .55; transition: fill .4s; }
+.midi-ring { fill: none; stroke: var(--midi-c); stroke-width: 2.4; opacity: .95; transition: stroke .4s; }
+.midi-btn { fill: #8f8699; font: 600 17px "Manrope", system-ui, sans-serif; }
+.midi-btn-y { fill: #c9b8e6; font-size: 12px; font-weight: 700; }
+.midi-mute { fill: #24212b; stroke: #ffffff0c; }
+.midi-mute-label { fill: #4b4454; font: 7px "Geist Mono", monospace; letter-spacing: .5px; }
+.midi-mesh circle { fill: #ffffff08; }
+#midiCanvas {
+  position: absolute;
+  left: 20%;
+  top: 51%;
+  width: 60%;
+  height: auto;
+  mix-blend-mode: screen;
+  opacity: .92;
+  pointer-events: none;
+}
+.midi[hidden] { display: none; }
+
+@media (max-width: 820px) {
+  .midi { width: 305px; }
+  .model-tab { font-size: 8px; padding: 5px 8px; }
+}
+@media (max-width: 690px) {
+  .model-switch { margin-right: 0; }
+  .midi { width: 290px; }
+}

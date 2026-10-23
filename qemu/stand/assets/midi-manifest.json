@@ -1,0 +1,45 @@
+{
+  "model": "midi",
+  "rootfs": {
+    "file": "midi-rootfs.ext4.gz",
+    "size": 273337124,
+    "sha256": "a8746d523edd839c413b627b9ff266bd3a7ec14bc88ee344bde8e8fb6e5bfb13",
+    "parts": [
+      {
+        "file": "midi-rootfs.ext4.gz.part000",
+        "size": 52428800,
+        "sha256": "a638cf7afd63dff11193d115848ef074b153b5f22e542e982fdabf683ccd9ade"
+      },
+      {
+        "file": "midi-rootfs.ext4.gz.part001",
+        "size": 52428800,
+        "sha256": "6d34e0229ee1d6c50449c555896aa1bfd6efe8a7d2c5a8d2cbaed5bbd0bbeca6"
+      },
+      {
+        "file": "midi-rootfs.ext4.gz.part002",
+        "size": 52428800,
+        "sha256": "0f344c6abac971d212c7ea31ee44f82ed4dff37e457689664f34f0058a73b5b6"
+      },
+      {
+        "file": "midi-rootfs.ext4.gz.part003",
+        "size": 52428800,
+        "sha256": "28cbabfae8efac1fb716a5269eb61d4405d66bde0df5561db81dd3965dc067cd"
+      },
+      {
+        "file": "midi-rootfs.ext4.gz.part004",
+        "size": 52428800,
+        "sha256": "3c31d44cea4b34bbaac2066537ec1658cce5238df6bf59359a55e93beeac4415"
+      },
+      {
+        "file": "midi-rootfs.ext4.gz.part005",
+        "size": 11193124,
+        "sha256": "a580453d3b67028085df085078c805b9f3c06daa786cd6c1d5c9ade245517574"
+      }
+    ]
+  },
+  "data": {
+    "file": "data.ext4.gz",
+    "size": 177156,
+    "sha256": "6c80478cde383ef77e89956685138343376195ddaeaf3ac628ee1583871a1c4d"
+  }
+}

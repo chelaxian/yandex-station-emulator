@@ -3,6 +3,9 @@
 Порт стенда [initialfox/yandex-station-emulator](https://github.com/initialfox/yandex-station-emulator)
 с macOS (Apple Silicon) на Windows 10/11 x64. Основан на коммите `8369237`.
 
+> **Миди и выбор модели:** см. [`qemu/stand/README.md`](qemu/stand/README.md) — там же
+> общий лаунчер `--model mini|midi` и панель со сценой Миди.
+
 ## Почему это не «просто скрипт»
 
 Вся связка macOS-стенда держится на трёх вещах, которых нет под Windows:
