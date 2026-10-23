@@ -1,0 +1,99 @@
+#!/bin/sh
+set -eu
+mkdir -p /tmp /run /mini2 /mnt/leds
+mount -t tmpfs -o mode=1777 tmpfs /tmp
+mount -t tmpfs tmpfs /run
+mkdir -p /dev/shm /dev/pts
+mount -t tmpfs -o mode=1777 tmpfs /dev/shm
+mount -t devpts devpts /dev/pts
+modprobe virtio_blk
+modprobe virtio_net
+modprobe ext4
+modprobe virtio_snd || true
+modprobe bluetooth || true
+modprobe hci_vhci || true
+if [ -f /opt/mini2/host_epoch ]; then
+    date -u -s "@$(cat /opt/mini2/host_epoch)"
+fi
+mount /dev/vda /mini2
+if [ -b /dev/vdb ]; then
+    modprobe vfat
+    mount -t vfat -o ro /dev/vdb /mini2/tee
+fi
+mount -t 9p -o trans=virtio,version=9p2000.L,msize=262144 leds /mnt/leds
+mount -t proc proc /mini2/proc
+mount --bind /etc/fake_cmdline /mini2/proc/cmdline
+mount --rbind /dev /mini2/dev
+mount -t tmpfs -o mode=1777 tmpfs /mini2/tmp
+mount -t tmpfs tmpfs /mini2/run
+# Keep real kernel sysfs available except the physical column's LED class.
+mount -t tmpfs tmpfs /mini2/sys
+for entry in /sys/*; do
+    name=${entry##*/}
+    [ "$name" = class ] && continue
+    [ -d "$entry" ] || continue
+    mkdir -p "/mini2/sys/$name"
+    mount --bind "$entry" "/mini2/sys/$name"
+done
+mkdir -p /mini2/sys/class/leds
+for entry in /sys/class/*; do
+    name=${entry##*/}
+    [ "$name" = leds ] && continue
+    mkdir -p "/mini2/sys/class/$name"
+    mount --bind "$entry" "/mini2/sys/class/$name"
+done
+mount --bind /mnt/leds /mini2/sys/class/leds
+# The firmware enables its microphone circuitry through Amlogic GPIO 414
+# before opening capture. Provide that register interface on the virt board.
+for gpio in 414 419; do
+    mkdir -p "/mini2/tmp/mic-gpio/gpio$gpio"
+    printf 'in\n' >"/mini2/tmp/mic-gpio/gpio$gpio/direction"
+    printf '1\n' >"/mini2/tmp/mic-gpio/gpio$gpio/value"
+done
+touch /mini2/tmp/mic-gpio/export /mini2/tmp/mic-gpio/unexport
+mkdir -p /mini2/sys/class/gpio
+mount --bind /mini2/tmp/mic-gpio /mini2/sys/class/gpio
+ip link set lo up
+# Keep the firmware's expected interface name; the transport is VirtIO Ethernet.
+network_if=eth0
+control_if=eth1
+for device in /sys/class/net/*; do
+    case "$(cat "$device/address" 2>/dev/null)" in
+        52:54:00:4d:32:01) network_if=${device##*/} ;;
+        52:54:00:4d:32:02) control_if=${device##*/} ;;
+    esac
+done
+ip link set "$network_if" name wlan0
+ip link set wlan0 up
+if [ "$(cat /opt/mini2/network_mode 2>/dev/null)" = lan ]; then
+    ip link set "$control_if" up
+    ip addr add 10.0.2.15/24 dev "$control_if"
+    udhcpc -i wlan0 -q -n -t 5 -s /opt/mini2/lan-dhcp.sh
+else
+    ip addr add 10.0.2.15/24 dev wlan0
+    ip route add default via 10.0.2.2
+    printf 'nameserver 10.0.2.3\n' >/etc/resolv.conf
+    printf 'nameserver 10.0.2.3\n' >/mini2/etc/resolv.conf
+fi
+echo 1 >/proc/sys/vm/overcommit_memory
+echo 'Mini 2: original firmware rootfs mounted; starting Alice services'
+cp /opt/mini2/alice-start.sh /mini2/emulator/alice-start.sh
+cp /opt/mini2/launch.json /mini2/emulator/launch.json
+cp /opt/mini2/asound.conf /mini2/etc/asound.conf
+cp /opt/mini2/btvirt /mini2/emulator/btvirt
+cp /opt/mini2/wpa-wired.conf /mini2/emulator/wpa-wired.conf
+if [ -f /opt/mini2/mic_relay ]; then
+    cp /opt/mini2/mic_relay /mini2/tmp/mic_relay
+    chmod 755 /mini2/tmp/mic_relay
+fi
+if [ -f /opt/mini2/pem-keys/private.pem ] && [ -f /opt/mini2/pem-keys/public.pem ] && [ -f /opt/mini2/pem_proxy ]; then
+    cp /opt/mini2/pem_proxy /mini2/tmp/pem_proxy
+    chmod 755 /mini2/tmp/pem_proxy
+    cp /opt/mini2/pem-keys/*.pem /mini2/tmp/
+    chmod 600 /mini2/tmp/private.pem /mini2/tmp/public.pem
+    rm -f /opt/mini2/pem-keys/private.pem /opt/mini2/pem-keys/public.pem
+fi
+chroot /mini2 /bin/sh /emulator/alice-start.sh >/mini2/tmp/alice-launcher.log 2>&1 &
+echo $! >/run/alice-launcher.pid
+/bin/sh /opt/mini2/status.sh >/tmp/firmware-status.log 2>&1 &
+echo $! >/run/firmware-status.pid

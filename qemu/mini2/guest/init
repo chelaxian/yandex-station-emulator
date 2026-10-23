@@ -1,0 +1,19 @@
+#!/bin/busybox sh
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+BB=/bin/busybox
+$BB mkdir -p /proc /sys /dev /tmp /newroot
+$BB mount -t proc proc /proc
+$BB mount -t sysfs sysfs /sys
+$BB mount -t devtmpfs devtmpfs /dev
+for module in virtio virtio_ring virtio_mmio virtio_pci 9pnet 9pnet_virtio 9p; do
+    $BB modprobe "$module" || true
+done
+if ! $BB mount -t 9p -o trans=virtio,version=9p2000.L,msize=262144 alpine /newroot; then
+    echo 'Cannot mount Alpine bootstrap'
+    exec $BB sh
+fi
+$BB mkdir -p /newroot/proc /newroot/sys /newroot/dev
+$BB mount --move /proc /newroot/proc
+$BB mount --move /sys /newroot/sys
+$BB mount --move /dev /newroot/dev
+exec $BB switch_root /newroot /sbin/init
