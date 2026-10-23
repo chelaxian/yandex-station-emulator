@@ -188,13 +188,43 @@ def main() -> int:
     tail = spawn_detached([sys.executable, str(VIEWER / "console_tail.py"), str(serial_log)], RUN / "console_tail.log")
     (RUN / "console_tail.pid").write_text(str(tail.pid))
 
+    def launch(audio_backend: str) -> subprocess.Popen:
+        cmdline = list(args)
+        cmdline[cmdline.index("-audiodev") + 1] = audio_backend + ",id=audio,out.frequency=48000"
+        log = open(RUN / "qemu-stdout.log", "ab")
+        return subprocess.Popen(cmdline, stdout=log, stderr=subprocess.STDOUT)
+
     try:
-        proc = subprocess.Popen(args, stdout=open(RUN / "qemu-stdout.log", "ab"), stderr=subprocess.STDOUT)
+        proc = launch(audio_backend)
     except OSError as e:
         raise SystemExit(f"QEMU failed to start: {e}")
     (RUN / "qemu.pid").write_text(str(proc.pid))
     notify_viewer({"state": "qemu", "up": True, "message": f"QEMU pid {proc.pid}"})
+
+    # QEMU can die instantly on Windows-specific issues (audio backend init
+    # failure, a console port left busy by a previous instance). If it died
+    # before writing a single byte of serial output, retry once with audio
+    # disabled — the stand is more useful without sound than not at all.
     try:
+        rc = None
+        for _ in range(40):  # up to ~10 s
+            rc = proc.poll()
+            if rc is not None:
+                break
+            if serial_log.stat().st_size > 0:
+                rc = None
+                break
+            time.sleep(0.25)
+        if rc is not None and serial_log.stat().st_size == 0 and audio_backend != "none":
+            tail = (RUN / "qemu-stdout.log").read_bytes()[-2000:]
+            (RUN / "qemu-retry.log").write_bytes(
+                b"QEMU died at startup with audio backend " + audio_backend.encode()
+                + b"\nretrying with audio disabled\n--- qemu output ---\n" + tail
+            )
+            print(f"QEMU died at startup (rc={rc}); retrying with audio disabled, see run/qemu-retry.log")
+            audio_backend = "none"
+            proc = launch("none")
+            (RUN / "qemu.pid").write_text(str(proc.pid))
         return proc.wait()
     finally:
         notify_viewer({"state": "qemu", "up": False, "message": "QEMU stopped"})
