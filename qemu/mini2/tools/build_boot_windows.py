@@ -26,6 +26,9 @@ STAND = Path(__file__).resolve().parents[1]
 GUEST = STAND / "guest"
 ARCHIVE = STAND / "alpine" / "initramfs-win.cpio.gz"
 MANIFEST = STAND / "run" / "win-initramfs.json"
+# POSIX metadata recorded by install_runtime_windows.py — Windows filesystems
+# do not keep exec bits or symlinks, so the tar's own metadata wins.
+META = STAND / "run" / "win-runtime-meta.json"
 
 
 def atomic_write(path: Path, data: bytes, mode: int = 0o644) -> None:
@@ -60,28 +63,49 @@ def cpio_record(name: str, data: bytes, mode: int, ino: int, nlink: int = 1) -> 
     return out
 
 
-def collect_tree(root: Path, skip: set[str]) -> list[tuple[str, bytes, int]]:
-    """Walk alpine_root and return (name, data, mode) newc entries."""
+def load_meta() -> dict[str, dict]:
+    """Load the POSIX metadata manifest written by install_runtime_windows."""
+    if not META.is_file():
+        return {}
+    try:
+        data = json.loads(META.read_text())
+        # manifest keys are repo-relative like qemu/mini2/alpine_root/...
+        prefix = "qemu/mini2/alpine_root/"
+        return {k[len(prefix):]: v for k, v in data.items() if k.startswith(prefix)}
+    except ValueError:
+        return {}
+
+
+def collect_tree(root: Path, skip: set[str], meta: dict[str, dict]) -> list[tuple[str, bytes, int]]:
+    """Walk alpine_root and return (name, data, mode) newc entries.
+
+    On Windows the on-disk tree loses exec bits and symlinks, so tar metadata
+    from the manifest takes priority when present.
+    """
     records: list[tuple[str, bytes, int]] = []
     directories: list[str] = []
 
     def rel(p: Path) -> str:
         return p.relative_to(root).as_posix()
 
-    # depth-first for deterministic order
     def walk(directory: Path) -> None:
         for entry in sorted(directory.iterdir(), key=lambda p: p.name):
             name = rel(entry)
             if name in skip:
                 continue
-            st = entry.lstat()
-            if statmod.S_ISLNK(st.st_mode):
-                records.append((name, os.readlink(entry).encode(), 0o120777))
-            elif entry.is_dir():
+            m = meta.get(name, {})
+            mtype = m.get("type")
+            if mtype == "symlink" or (not m and entry.is_symlink()):
+                link = m.get("linkname") or os.readlink(entry)
+                records.append((name, link.encode(), 0o120777))
+            elif mtype == "dir" or entry.is_dir():
                 directories.append(name)
                 walk(entry)
-            elif entry.is_file():
-                records.append((name, entry.read_bytes(), 0o100000 | (st.st_mode & 0o777)))
+            elif mtype == "file" or entry.is_file():
+                mode = m.get("mode")
+                if not isinstance(mode, int):
+                    mode = statmod.S_IMODE(entry.lstat().st_mode)
+                records.append((name, entry.read_bytes(), 0o100000 | (mode & 0o777)))
             # sockets/pipes/fifos in the tree are skipped — they cannot be
             # meaningful inside an initramfs archive
 
@@ -133,6 +157,8 @@ def build() -> None:
                 pass
             if path.is_file():
                 h.update(hashlib.sha256(path.read_bytes()).digest())
+    if META.is_file():
+        h.update(b"M" + hashlib.sha256(META.read_bytes()).digest())
     inputs_digest = h.hexdigest()
     if ARCHIVE.is_file() and MANIFEST.is_file():
         try:
@@ -143,7 +169,10 @@ def build() -> None:
             pass
 
     print(f"packing alpine_root → {ARCHIVE.name} ({total_files} entries, {total_bytes/1e6:.1f} MB)…")
-    entries = collect_tree(alpine_root, skip=set())
+    meta = load_meta()
+    if meta:
+        print(f"using POSIX metadata manifest: {len(meta)} entries")
+    entries = collect_tree(alpine_root, skip=set(), meta=meta)
     name_to_entry = {name: (data, mode) for name, data, mode in entries}
 
     # overlay guest scripts

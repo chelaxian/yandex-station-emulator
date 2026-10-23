@@ -88,8 +88,29 @@ def _read_pid(name: str) -> int | None:
 
 
 def _alive(pid: int | None) -> bool:
+    """Cross-platform liveness check.
+
+    os.kill(pid, 0) is POSIX-only: on Windows CPython maps it to
+    GenerateConsoleCtrlEvent/TerminateProcess instead of a probe, so a
+    status poll could signal or kill the process. Use the Win32 API there.
+    """
     if not pid:
         return False
+    if os.name == "nt":
+        import ctypes
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        STILL_ACTIVE = 259
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
+        if not handle:
+            return False
+        try:
+            code = ctypes.c_ulong()
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                return False
+            return code.value == STILL_ACTIVE
+        finally:
+            kernel32.CloseHandle(handle)
     try:
         os.kill(pid, 0)
         return True

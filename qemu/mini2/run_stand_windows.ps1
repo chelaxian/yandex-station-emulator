@@ -63,8 +63,8 @@ if (-not $ok) {
     exit 1
 }
 
-# LED bridge (TCP listener for the guest agent)
-Set-Content (Join-Path $Run "led_bridge.pid") (Start-Py (Join-Path $Dir "viewer\led_bridge_windows.py") (Join-Path $Run "led_bridge.log"))
+# LED bridge: started by server_windows.py (ensure_led_bridge) — starting a
+# second copy here would fight over TCP 19095 and overwrite the pid file.
 
 # host helper (mic PCM 19093 + PEM/epoch HTTP 19094)
 Set-Content (Join-Path $Run "host-helper.pid") (Start-Py (Join-Path $Dir "tools\host_helper.py") (Join-Path $Run "host-helper.log"))

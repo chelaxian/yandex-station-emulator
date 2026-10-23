@@ -28,11 +28,17 @@ def rpc(action, index, data=b'', offset=0):
     temporary = None
     command = shlex.join(base+args)
     if action == 'write':
-        directory=ROOT/'alpine_root/opt/mini2/ble-rpc'
-        directory.mkdir(mode=0o700,exist_ok=True);directory.chmod(0o700)
+        # Windows port: alpine_root is embedded in the initramfs, so host
+        # writes into it never reach the guest. Stage the payload for the
+        # host helper (HTTP 19094, NAT-gateway-visible as 10.0.2.2) and let
+        # the guest fetch it with wget — keeps credentials out of the serial
+        # echo exactly like the original 9p-based staging did.
+        directory=ROOT/'run/ble-rpc'
+        directory.mkdir(parents=True,exist_ok=True)
         temporary=directory/uuid.uuid4().hex
-        temporary.write_text(value);temporary.chmod(0o600)
-        command=shlex.join(base+[args[0]])+' "$(cat /opt/mini2/ble-rpc/'+temporary.name+')" '+shlex.quote(args[2])
+        temporary.write_text(value)
+        command=shlex.join(['wget','-q','-O','/tmp/ble-rpc-'+temporary.name,
+                            'http://10.0.2.2:19094/ble-rpc/'+temporary.name,'&&'])+' '+shlex.join(base+[args[0]])+' "$(cat /tmp/ble-rpc-'+temporary.name+')" '+shlex.quote(args[2])
     try:
         with LOCK:
             result = subprocess.run([sys.executable,str(ROOT/'tools/console.py'),command,'--timeout','6'],capture_output=True,text=True,timeout=12)

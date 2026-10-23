@@ -9,18 +9,27 @@ Set-Location $Repo
 if (-not ([Environment]::Is64BitOperatingSystem)) { throw "Requires a 64-bit Windows." }
 
 # ------------------------------------------------------------- python
-function Get-PyExe {
-    if (Get-Command python -ErrorAction SilentlyContinue) { return @("python") }
-    if (Get-Command py -ErrorAction SilentlyContinue)     { return @("py", "-3") }
-    return $null
+function Get-PyExe { return [pscustomobject]@{ Exe = "python"; Args = @() } }
+$py = $null
+if (Get-Command python -ErrorAction SilentlyContinue) {
+    $py = [pscustomobject]@{ Exe = "python"; Args = @() }
+} elseif (Get-Command py -ErrorAction SilentlyContinue) {
+    $py = [pscustomobject]@{ Exe = "py"; Args = @("-3") }
 }
-$py = Get-PyExe
 if (-not $py) {
     Write-Host "[setup] installing Python 3.12 via winget…"
     winget install --id Python.Python.3.12 --exact --accept-package-agreements --accept-source-agreements
     $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + $env:Path
-    $py = Get-PyExe
+    if (Get-Command python -ErrorAction SilentlyContinue) {
+        $py = [pscustomobject]@{ Exe = "python"; Args = @() }
+    } elseif (Get-Command py -ErrorAction SilentlyContinue) {
+        $py = [pscustomobject]@{ Exe = "py"; Args = @("-3") }
+    }
     if (-not $py) { throw "Python install failed. Install manually from python.org and re-run." }
+}
+function Invoke-Py([string[]]$ScriptArgs) {
+    & $py.Exe (@($py.Args) + $ScriptArgs)
+    if ($LASTEXITCODE -ne 0) { throw "python failed: $ScriptArgs" }
 }
 
 # --------------------------------------------------------------- qemu
@@ -41,23 +50,19 @@ if (-not $qemu) {
 Write-Host "[setup] QEMU: $qemu"
 
 # --------------------------------------------- python deps (mic capture)
-& $py[0] @($py[1..($py.Count-1)]) -m pip install --quiet sounddevice 2>$null
-if ($LASTEXITCODE -ne 0) {
-    Write-Warning "sounddevice not installed — microphone will be unavailable (pip install sounddevice)."
-}
+try { Invoke-Py @("-m", "pip", "install", "--quiet", "sounddevice") }
+catch { Write-Warning "sounddevice not installed — microphone will be unavailable (pip install sounddevice)." }
 
 # ------------------------------------------------------------- runtime
 if (-not (Test-Path "assets\runtime-manifest.json")) {
     throw "assets/ not found — clone the full repository first (git clone --recursive is not needed; assets are regular git files)."
 }
 Write-Host "[setup] verifying and unpacking the runtime (~3 GB)…"
-& $py[0] @($py[1..($py.Count-1)]) "scripts\install_runtime_windows.py"
-if ($LASTEXITCODE -ne 0) { throw "Runtime installation failed." }
+Invoke-Py @("scripts\install_runtime_windows.py")
 
 # ---------------------------------------------- windows boot initramfs
 Write-Host "[setup] building the Windows initramfs (no 9p needed)…"
-& $py[0] @($py[1..($py.Count-1)]) "qemu\mini2\tools\build_boot_windows.py"
-if ($LASTEXITCODE -ne 0) { throw "Initramfs build failed." }
+Invoke-Py @("qemu\mini2\tools\build_boot_windows.py")
 
 # ------------------------------------------------------------ launch
 Write-Host "[setup] starting the stand…"

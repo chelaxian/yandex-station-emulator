@@ -33,12 +33,16 @@ if sys.platform != "win32":
     print("На macOS используйте HardwareBridge.swift, на Linux — bluez-аналог.")
     sys.exit(1)
 
-from winsdk.windows.devices.bluetooth import BluetoothLEManufacturerData
 from winsdk.windows.devices.bluetooth.advertisement import (
     BluetoothLEAdvertisement,
     BluetoothLEAdvertisementPublisher,
     BluetoothLEAdvertisementPublisherStatus,
 )
+try:
+    # проекция может класть класс как в .bluetooth, так и в .bluetooth.advertisement
+    from winsdk.windows.devices.bluetooth import BluetoothLEManufacturerData
+except ImportError:
+    from winsdk.windows.devices.bluetooth.advertisement import BluetoothLEManufacturerData
 from winsdk.windows.devices.bluetooth.genericattributeprofile import (
     GattLocalCharacteristicParameters,
     GattServiceProvider,

@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
 """Windows port of install_runtime.py: verify and unpack the runtime parts.
 
-Differences: extracting the tar on Windows cannot always create symlinks
-(requires Developer Mode or elevation). This extractor tries real symlinks
-first and falls back to copying the target (files and directories); for
-absolute chroot-internal targets the copy is resolved against the
-extraction root. Never replaces an existing VM disk.
+Windows specifics:
+- symlink extraction requires Developer Mode or elevation. This extractor
+  tries real symlinks first, then falls back to copying the target. Absolute
+  chroot-internal targets are resolved against the member's own directory
+  (e.g. alpine_root/bin/wget -> /bin/busybox resolves inside alpine_root).
+- Windows filesystems do not preserve POSIX exec bits, so every extracted
+  member's metadata (mode, type, link target) is recorded in
+  qemu/mini2/run/win-runtime-meta.json. build_boot_windows.py consumes that
+  manifest to build a POSIX-correct initramfs regardless of host FS.
+- Never replaces an existing VM disk.
 """
 import argparse
 import hashlib
@@ -41,38 +46,48 @@ for part in manifest["parts"]:
 if total.hexdigest() != manifest["archive_sha256"]:
     raise SystemExit("Archive checksum mismatch")
 disk = target / "qemu/mini2/mini2-backup.ext4"
+meta_out = target / "qemu/mini2/run/win-runtime-meta.json"
 if disk.exists():
     print("Runtime verified; existing guest disk preserved.")
     raise SystemExit(0)
 
 
 def resolve_target(member: tarfile.TarInfo, linkname: str) -> Path | None:
-    """Resolve a symlink target against the extraction root (chroot-style)."""
-    t = PurePosixPath(linkname)
-    if t.is_absolute():
-        t = PurePosixPath(*t.parts[1:])
-    if ".." in t.parts:
+    """Resolve a symlink target for the copy-fallback.
+
+    Absolute chroot-internal targets (leading /) are resolved against the
+    member's own directory, so alpine_root/bin/wget -> /bin/busybox maps
+    to alpine_root/bin/busybox, not <dest>/bin/busybox.
+    """
+    t = PurePosixPath(member.name).parent / linkname  # handles relative links
+    if linkname.startswith("/"):
+        t = PurePosixPath(member.name).parent / linkname.lstrip("/")
+    parts = []
+    for component in t.parts:
+        if component == "..":
+            if parts:
+                parts.pop()
+        elif component not in ("", "."):
+            parts.append(component)
+    if not parts:
         return None
-    return target / Path(*t.parts)
+    return target / Path(*parts)
 
 
-def extract_fallback(archive: tarfile.TarFile, member: tarfile.TarInfo) -> None:
-    """Extract one member with symlink → copy fallback (Windows-safe)."""
-    if member.issym():
-        dest = target / Path(*PurePosixPath(member.name).parts)
-        src = resolve_target(member, member.linkname)
-        try:
-            if src and src.is_file():
-                shutil.copy2(src, dest)
-                return
-            if src and src.is_dir():
-                shutil.copytree(src, dest, dirs_exist_ok=True)
-                return
-        except OSError:
-            pass
-        dest.write_bytes(b"")  # keep a placeholder; guest can recreate it
-        return
-    archive.extract(member, target, filter="fully_trusted")
+def copy_fallback(archive: tarfile.TarFile, member: tarfile.TarInfo) -> None:
+    """Extract one symlink member with a copy fallback (Windows-safe)."""
+    dest = target / Path(*PurePosixPath(member.name).parts)
+    src = resolve_target(member, member.linkname)
+    try:
+        if src and src.is_file():
+            shutil.copy2(src, dest)
+            return
+        if src and src.is_dir():
+            shutil.copytree(src, dest, dirs_exist_ok=True)
+            return
+    except OSError:
+        pass
+    dest.write_bytes(b"")  # placeholder; the cpio builder has the real metadata
 
 
 class Parts(io.RawIOBase):
@@ -102,18 +117,27 @@ class Parts(io.RawIOBase):
         super().close()
 
 
+meta: dict[str, dict] = {}
 with io.BufferedReader(Parts(paths)) as stream:
     with tarfile.open(fileobj=stream, mode="r|gz") as archive:
         for member in archive:
             path = PurePosixPath(member.name)
             if path.is_absolute() or ".." in path.parts or path.parts[0] not in ("qemu", "firmware"):
                 raise SystemExit("Unsafe archive path")
-            if member.issym() or member.islnk():
+            if member.isfile() or member.isdir() or member.issym():
+                meta[member.name] = {
+                    "mode": member.mode,
+                    "type": "dir" if member.isdir() else "symlink" if member.issym() else "file",
+                    **({"linkname": member.linkname} if member.issym() else {}),
+                }
+            if member.issym():
                 try:
                     archive.extract(member, target, filter="fully_trusted")
                 except OSError:
-                    extract_fallback(archive, member)
+                    copy_fallback(archive, member)
             else:
                 archive.extract(member, target, filter="fully_trusted")
 (target / "qemu/mini2/run").mkdir(exist_ok=True)
-print("Runtime installed:", disk)
+meta_out.write_text(json.dumps(meta, indent=0, sort_keys=True))
+print(f"Runtime installed: {disk}")
+print(f"POSIX metadata manifest: {meta_out} ({len(meta)} entries)")

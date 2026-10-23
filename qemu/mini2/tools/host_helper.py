@@ -54,6 +54,7 @@ class MicSource:
         self.pcm: queue.Queue = queue.Queue(maxsize=32)
         self.ok = False
         self.error = ""
+        self.channels = 0
         self.thread = threading.Thread(target=self._run, daemon=True)
 
     def _run(self) -> None:
@@ -64,31 +65,47 @@ class MicSource:
                 _state["microphone"] = f"capture unavailable: sounddevice not installed ({e})"
                 save()
             return
-        def callback(in_data, frame_count, time_info, status):
-            data = bytes(in_data)
-            # stereo interleaved S16LE → RMS over all samples
-            count = len(data) // 2
-            if count:
-                acc = 0
-                for i in range(0, count, 16):  # sparse sampling is enough for RMS
-                    v = int.from_bytes(data[i * 2 : i * 2 + 2], "little", signed=True)
-                    acc += v * v
-                rms = math.sqrt(acc / max(1, count // 16)) / 32768
-                with _state_lock:
-                    _state["mic_rms"] = round(rms, 5)
-                    _state["microphone"] = "capturing"
-                    save()
-            try:
-                self.pcm.put_nowait(data)
-            except queue.Full:
-                pass  # drop — keep latency bounded
-            return None, 0
 
+        def make_callback(channels: int):
+            def callback(in_data, frame_count, time_info, status):
+                data = bytes(in_data)
+                if channels == 1:
+                    # mono device → duplicate samples into stereo frames
+                    mono = data
+                    data = b"".join(mono[i : i + 2] * 2 for i in range(0, len(mono), 2))
+                # stereo interleaved S16LE → RMS over all samples
+                count = len(data) // 2
+                if count:
+                    acc = 0
+                    for i in range(0, count, 16):  # sparse sampling is enough for RMS
+                        v = int.from_bytes(data[i * 2 : i * 2 + 2], "little", signed=True)
+                        acc += v * v
+                    rms = math.sqrt(acc / max(1, count // 16)) / 32768
+                    with _state_lock:
+                        _state["mic_rms"] = round(rms, 5)
+                        _state["microphone"] = "capturing"
+                        save()
+                try:
+                    self.pcm.put_nowait(data)
+                except queue.Full:
+                    pass  # drop — keep latency bounded
+                return None, 0
+            return callback
+
+        # Prefer stereo S16LE @48k; fall back to a mono input device.
         try:
             stream = sd.RawInputStream(
                 samplerate=48000, channels=2, dtype="int16",
-                input_callback=callback, blocksize=1024,
+                callback=make_callback(2), blocksize=1024,
             )
+            self.channels = 2
+        except Exception:
+            stream = sd.RawInputStream(
+                samplerate=48000, channels=1, dtype="int16",
+                callback=make_callback(1), blocksize=1024,
+            )
+            self.channels = 1
+        try:
             stream.start()
             self.ok = True
             with _state_lock:
@@ -100,6 +117,22 @@ class MicSource:
             with _state_lock:
                 _state["microphone"] = f"capture unavailable: {e}"
                 save()
+
+
+# ------------------------------------------------------------ ble staging
+
+def ble_stage_dir() -> Path:
+    """Directory for one-shot GATT write payloads (served to the guest).
+
+    hardware_rpc stages base64 payloads here instead of writing into
+    alpine_root — with the embedded Windows initramfs, host writes to
+    alpine_root never reach the guest. The guest fetches them via
+    http://10.0.2.2:19094/ble-rpc/<name>, keeping credentials out of the
+    serial console echo.
+    """
+    d = RUN / "ble-rpc"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
 
 
 def mic_server() -> None:
@@ -176,6 +209,13 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/health":
             with _state_lock:
                 body = json.dumps(_state).encode()
+        elif path.startswith("/ble-rpc/"):
+            fp = ble_stage_dir() / Path(path).name
+            try:
+                body = fp.read_bytes()
+            except OSError:
+                self.send_error(404)
+                return
         else:
             self.send_error(404)
             return

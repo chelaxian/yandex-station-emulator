@@ -45,15 +45,16 @@ _lock = threading.Lock()
 _dirty = threading.Event()
 
 
-def post(payload: dict) -> None:
+def post(payload: dict) -> bool:
     data = json.dumps(payload, ensure_ascii=False).encode()
     req = urllib.request.Request(
         VIEWER, data=data, headers={"Content-Type": "application/json"}, method="POST"
     )
     try:
         urllib.request.urlopen(req, timeout=1.5).read()
+        return True
     except (urllib.error.URLError, TimeoutError, OSError):
-        pass
+        return False
 
 
 def bri(name: str) -> int:
@@ -187,6 +188,7 @@ def handle_line(line: str) -> None:
 def main() -> int:
     threading.Thread(target=accept_loop, daemon=True).start()
     last_key = None
+    last_status = None
     last_post = 0.0
     while True:
         _dirty.wait(timeout=2)
@@ -197,15 +199,23 @@ def main() -> int:
                 time.sleep(max(0, MIN_POST_INTERVAL - (now - last_post)))
             with _lock:
                 snap = snapshot()
+                status = _status_json
+            # firmware status must persist whenever it changes, independently
+            # of the LED dedup key — the status timestamp advances every 5 s
+            if status != last_status:
+                last_status = status
+                persist_status()
             key = json.dumps(snap, sort_keys=True)
             if key != last_key:
-                last_key = key
-                last_post = time.monotonic()
-                post(snap)
-                persist_status()
+                # only commit last_key after a successful post, so a failed
+                # POST (viewer down) is retried on the next snapshot
+                if post(snap):
+                    last_key = key
+                    last_post = time.monotonic()
+                else:
+                    last_key = None  # retry next round
         except Exception:
-            # a posting error must never kill the bridge — the guest agent
-            # reconnects and the next snapshot will retry
+            last_key = None  # force a retry next round
             time.sleep(1)
     return 0
 

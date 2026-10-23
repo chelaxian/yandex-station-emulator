@@ -61,8 +61,29 @@ def find_qemu() -> str:
 
 
 def alive(pid: int | None) -> bool:
+    """Cross-platform liveness check.
+
+    os.kill(pid, 0) is POSIX-only: on Windows CPython maps it to
+    GenerateConsoleCtrlEvent/TerminateProcess instead of a probe, so a
+    status poll could signal or kill the process. Use the Win32 API there.
+    """
     if not pid:
         return False
+    if os.name == "nt":
+        import ctypes
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        STILL_ACTIVE = 259
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
+        if not handle:
+            return False
+        try:
+            code = ctypes.c_ulong()
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                return False
+            return code.value == STILL_ACTIVE
+        finally:
+            kernel32.CloseHandle(handle)
     try:
         os.kill(pid, 0)
         return True
@@ -97,13 +118,16 @@ def ensure_host_helper() -> None:
 
 
 def ensure_hardware_rpc() -> None:
-    # BLE GATT bridge backend (loopback-only, same role as on macOS)
-    if not (STAND / "run" / "hardware.json").exists() and not os.environ.get("MINI2_DISABLE_BLE"):
-        pid = read_pid("hardware-rpc.pid")
-        if alive(pid):
-            return
-        proc = spawn_detached([sys.executable, str(STAND / "tools" / "hardware_rpc.py")], RUN / "hardware-rpc.log")
-        (RUN / "hardware-rpc.pid").write_text(str(proc.pid))
+    # BLE GATT bridge backend (loopback-only, same role as on macOS).
+    # NOTE: do not gate this on run/hardware.json — the host helper creates
+    # that file at startup, before this check runs.
+    if os.environ.get("MINI2_DISABLE_BLE"):
+        return
+    pid = read_pid("hardware-rpc.pid")
+    if alive(pid):
+        return
+    proc = spawn_detached([sys.executable, str(STAND / "tools" / "hardware_rpc.py")], RUN / "hardware-rpc.log")
+    (RUN / "hardware-rpc.pid").write_text(str(proc.pid))
 
 
 def main() -> int:
