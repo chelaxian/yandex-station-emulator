@@ -18,6 +18,7 @@ import hashlib
 import json
 import os
 import shutil
+import struct
 import subprocess
 import sys
 from pathlib import Path
@@ -27,8 +28,8 @@ REPO = STAND.parents[1]
 ASSETS = STAND / "assets"
 DATA = STAND / "data"
 
+SUPERBLOCK_OFFSET = 1024
 EXT4_MAGIC = b"\x53\xef"
-EXT4_MAGIC_OFFSET = 1080  # 1024-byte boot block + 56 bytes into the superblock
 
 
 def sha256(path: Path) -> str:
@@ -43,14 +44,39 @@ def matches(path: Path, size: int, digest: str) -> bool:
     return path.is_file() and path.stat().st_size == size and sha256(path) == digest
 
 
-def is_ext4(path: Path) -> bool:
-    """True when the file at least carries a valid ext2/3/4 superblock."""
+def ext4_expected_size(path: Path) -> int | None:
+    """Image size implied by the ext4 superblock (None when it is not ext4)."""
     try:
-        if path.stat().st_size < EXT4_MAGIC_OFFSET + 2:
-            return False
         with path.open("rb") as f:
-            f.seek(EXT4_MAGIC_OFFSET)
-            return f.read(2) == EXT4_MAGIC
+            f.seek(SUPERBLOCK_OFFSET)
+            sb = f.read(1024)
+    except OSError:
+        return None
+    if len(sb) < 0x154 or sb[0x38:0x3A] != EXT4_MAGIC:
+        return None
+    try:
+        block_size = 1024 << struct.unpack_from("<I", sb, 0x18)[0]
+        blocks = struct.unpack_from("<I", sb, 0x4)[0]
+        if struct.unpack_from("<I", sb, 0x60)[0] & 0x80:  # INCOMPAT_64BIT
+            blocks |= struct.unpack_from("<I", sb, 0x150)[0] << 32
+    except struct.error:
+        return None
+    if block_size < 1024 or block_size > 65536 or blocks == 0:
+        return None
+    return blocks * block_size
+
+
+def is_ext4(path: Path) -> bool:
+    """True for ext4 whose file is not shorter than its superblock describes.
+
+    A bare magic check accepted images truncated right after the superblock;
+    comparing the file length with s_blocks_count * block_size catches that.
+    """
+    expected = ext4_expected_size(path)
+    if expected is None:
+        return False
+    try:
+        return path.stat().st_size >= expected
     except OSError:
         return False
 

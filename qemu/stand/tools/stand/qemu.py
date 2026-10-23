@@ -82,7 +82,9 @@ class Stand:
         self.model = config.model(model)
         self.audio = audio or os.environ.get("AUDIO_BACKEND") or self.model["audio"]
         self.console_port = console_port
-        self.qemu = qemu or find_qemu()
+        # Resolved lazily: a panel that only inspects/adopts a running QEMU
+        # must not fail when the QEMU binary is not in PATH right now.
+        self.qemu: str | None = qemu
         self.run_dir = config.ROOT / "run" / self.model["id"]
         self.run_dir.mkdir(parents=True, exist_ok=True)
         self.console_log = self.run_dir / "console.log"
@@ -102,13 +104,37 @@ class Stand:
             )
 
     # -- command line -----------------------------------------------------
+    def ports(self) -> list[int]:
+        """Host TCP ports QEMU will bind (console + every hostfwd)."""
+        ports = [self.console_port]
+        for rule in self.model.get("hostfwd") or ():
+            try:
+                ports.append(int(rule.split(":")[2].split("-")[0]))
+            except (IndexError, ValueError):
+                continue
+        return ports
+
+    @classmethod
+    def attach(cls, model_name: str) -> "Stand | None":
+        """Controller for an already running QEMU, or None."""
+        try:
+            stand = cls(model_name)
+        except (OSError, SystemExit):
+            return None
+        return stand if stand.alive() else None
+
     def args(self) -> list[str]:
         m = self.model
+        try:
+            qemu = self.qemu or find_qemu()
+        except SystemExit as e:
+            raise RuntimeError(str(e)) from e
+        self.qemu = qemu
         netdev = "user,id=n0"
         for rule in m.get("hostfwd") or ():
             netdev += f",hostfwd={rule}"
         a = [
-            self.qemu,
+            qemu,
             "-M", "virt",
             "-cpu", m["cpu"],
             "-smp", "4",
@@ -225,16 +251,54 @@ class Stand:
             pass
 
     # -- lifecycle --------------------------------------------------------
+    def _wait_started(self) -> None:
+        """Fail fast when QEMU dies on a busy port instead of reporting success."""
+        for _ in range(25):
+            if self.proc is None:
+                return
+            code = self.proc.poll()
+            if code is not None:
+                tail = self._tail("qemu-stdout.log") or self._tail("console.log")
+                raise RuntimeError(f"QEMU завершился при запуске (код {code}).\n{tail}")
+            try:
+                if self.console_log.stat().st_size:
+                    return
+            except OSError:
+                pass
+            time.sleep(0.1)
+
     def start(self, detached: bool = True) -> subprocess.Popen:
         if self.proc and self.proc.poll() is None:
             return self.proc
-        if _alive(self._pid()):
-            raise RuntimeError("already running")
+        pid = self._pid()
+        if _alive(pid):
+            raise RuntimeError(
+                f"QEMU уже запущен (pid {pid}); панель подхватывает его через /api/state. "
+                "Чтобы перезапустить, сначала остановите его."
+            )
         self.check()
+        busy = [str(port) for port in self.ports() if _port_open(port)]
+        if busy:
+            raise RuntimeError(
+                f"порт(ы) {', '.join(busy)} уже заняты, а {self.run_dir / 'qemu.pid'} "
+                "отсутствует или устарел: похоже, QEMU уже работает. "
+                "Остановите старый процесс или перезапустите панель."
+            )
         self.ensure_helpers()
         self.console_log.write_text("")
         self.proc = self._spawn(self.args(), "qemu-stdout.log")
         (self.run_dir / "qemu.pid").write_text(str(self.proc.pid))
+        try:
+            self._wait_started()
+        except RuntimeError:
+            self._kill(self.proc.pid)
+            self.proc = None
+            try:
+                (self.run_dir / "qemu.pid").unlink()
+            except OSError:
+                pass
+            self.stop_helpers()
+            raise
         return self.proc
 
     def _pid(self) -> int | None:

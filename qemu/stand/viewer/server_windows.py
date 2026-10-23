@@ -16,12 +16,29 @@ from stand import config, led, qemu
 ROOT = Path(__file__).resolve().parent
 PORT = 8765
 LOCK = threading.Lock()
+ADOPT_LOCK = threading.Lock()
 STATE: dict = {"stand": None}
 LED = led.Bridge()
 
 
+def adopt_running() -> qemu.Stand | None:
+    """Attach to a QEMU left running by a previous panel instance."""
+    for name in config.MODELS:
+        stand = qemu.Stand.attach(name)
+        if stand is not None:
+            return stand
+    return None
+
+
 def current() -> qemu.Stand | None:
-    return STATE["stand"]
+    stand = STATE["stand"]
+    if stand is None:
+        with ADOPT_LOCK:
+            stand = STATE["stand"]
+            if stand is None:
+                stand = adopt_running()
+                STATE["stand"] = stand
+    return stand
 
 
 def ensure(model_name: str) -> qemu.Stand:
@@ -186,6 +203,9 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=PORT)
     a = ap.parse_args()
+    adopted = current()
+    if adopted:
+        print(f"Adopted running {adopted.model['id']} (pid {adopted.pid()})", flush=True)
     LED.start()
     httpd = ThreadingHTTPServer(("127.0.0.1", a.port), Handler)
     httpd.daemon_threads = True
