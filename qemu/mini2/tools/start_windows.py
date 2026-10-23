@@ -190,7 +190,9 @@ def main() -> int:
 
     def launch(audio_backend: str) -> subprocess.Popen:
         cmdline = list(args)
-        cmdline[cmdline.index("-audiodev") + 1] = audio_backend + ",id=audio,out.frequency=48000"
+        cmdline[cmdline.index("-audiodev") + 1] = (
+            "none" if audio_backend == "none" else audio_backend + ",id=audio,out.frequency=48000"
+        )
         log = open(RUN / "qemu-stdout.log", "ab")
         return subprocess.Popen(cmdline, stdout=log, stderr=subprocess.STDOUT)
 
