@@ -5,6 +5,7 @@ import json
 import re
 import shlex
 import subprocess
+import sys
 import threading
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -34,7 +35,7 @@ def rpc(action, index, data=b'', offset=0):
         command=shlex.join(base+[args[0]])+' "$(cat /opt/mini2/ble-rpc/'+temporary.name+')" '+shlex.quote(args[2])
     try:
         with LOCK:
-            result = subprocess.run(['/usr/bin/python3',str(ROOT/'tools/console.py'),command,'--timeout','6'],capture_output=True,text=True,timeout=12)
+            result = subprocess.run([sys.executable,str(ROOT/'tools/console.py'),command,'--timeout','6'],capture_output=True,text=True,timeout=12)
     finally:
         if temporary: temporary.unlink(missing_ok=True)
     lines = result.stdout.splitlines()

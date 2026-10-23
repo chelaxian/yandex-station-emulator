@@ -1,0 +1,16 @@
+#!/bin/busybox sh
+# Windows port: the whole Alpine bootstrap is embedded in this initramfs
+# (no 9p share needed — QEMU on Windows has no virtfs).
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+BB=/bin/busybox
+$BB mkdir -p /proc /sys /dev /tmp
+[ -c /dev/null ] || $BB mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
+$BB mount -t proc proc /proc
+$BB mount -t sysfs sysfs /sys
+# virtio stack: busybox modprobe does not resolve PCI aliases (no udev),
+# so virtio_pci must be loaded explicitly or virtio-blk/net devices stay dead
+for module in virtio virtio_ring virtio_mmio virtio_pci virtio_blk virtio_net; do
+    $BB modprobe "$module" 2>/dev/null || true
+done
+# rootfs is already the unpacked cpio — run the real Alpine init
+exec /sbin/init

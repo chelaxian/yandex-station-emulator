@@ -1,19 +1,49 @@
 #!/usr/bin/env python3
-"""Run a diagnostic command through the VM's local serial console."""
+"""Run a diagnostic command through the VM's local serial console.
+
+Windows port: the console chardev is a TCP socket on 127.0.0.1:19096
+(Windows QEMU has no AF_UNIX chardev); on macOS/AF_UNIX hosts the unix
+socket is still tried first. --socket accepts a path or host:port.
+"""
 import argparse
 import select
 import socket
 import time
 from pathlib import Path
 
+CONSOLE_TCP = ("127.0.0.1", 19096)
+
+
+def connect(spec: str | None) -> socket.socket:
+    if spec and ":" in spec and not spec.startswith("\\\\"):
+        host, _, port = spec.rpartition(":")
+        s = socket.create_connection((host or "127.0.0.1", int(port)), timeout=3)
+        return s
+    if spec:
+        s = socket.socket(socket.AF_UNIX)
+        s.settimeout(3)
+        s.connect(spec)
+        return s
+    unix = Path(__file__).resolve().parents[1] / "run" / "console.sock"
+    if hasattr(socket, "AF_UNIX"):
+        try:
+            s = socket.socket(socket.AF_UNIX)
+            s.settimeout(3)
+            s.connect(str(unix))
+            return s
+        except OSError:
+            pass
+    s = socket.create_connection(CONSOLE_TCP, timeout=3)
+    return s
+
+
 p = argparse.ArgumentParser()
 p.add_argument("command")
 p.add_argument("--timeout", type=float, default=15)
-p.add_argument("--socket", type=Path, help="Override the VM serial socket for an isolated probe")
+p.add_argument("--socket", help="Override the VM serial socket (path or host:port)")
 a = p.parse_args()
-s = socket.socket(socket.AF_UNIX)
+s = connect(a.socket)
 s.settimeout(3)
-s.connect(str(a.socket or Path(__file__).resolve().parents[1] / "run/console.sock"))
 s.sendall(b"\n")
 out = b""
 deadline = time.monotonic() + 4
