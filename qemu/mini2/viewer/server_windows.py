@@ -254,7 +254,16 @@ def firmware_status() -> dict[str, Any]:
         try:
             report = json.loads(candidate.read_text())
             status.update(report)
-            status["fresh"] = 0 <= time.time() - report["timestamp"] < 20 and qemu_status()["up"]
+            # freshness by the HOST-side file mtime (the LED bridge rewrites
+            # the file every ~5 s). The guest timestamp can be skewed when the
+            # guest/host clocks drift apart, which falsely showed "no data".
+            try:
+                age = time.time() - candidate.stat().st_mtime
+            except OSError:
+                age = None
+            status["fresh"] = (
+                age is not None and 0 <= age < 20 and qemu_status()["up"]
+            )
             break
         except (OSError, ValueError, KeyError, TypeError):
             continue
