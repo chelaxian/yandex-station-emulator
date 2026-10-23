@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Windows LED bridge: guest LED agent → viewer panel.
+"""Windows LED bridge: guest LED agent -> viewer panel.
 
 On macOS the fake LED sysfs is a 9p share that the host polls directly.
 Windows QEMU has no 9p, so the guest pushes "name brightness" lines plus
@@ -140,7 +140,7 @@ def accept_loop() -> None:
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     srv.bind(LISTEN)
     srv.listen(4)
-    print(f"led bridge TCP → {LISTEN[0]}:{LISTEN[1]}", flush=True)
+    print(f"led bridge TCP -> {LISTEN[0]}:{LISTEN[1]}", flush=True)
     while True:
         try:
             conn, _ = srv.accept()
@@ -219,6 +219,15 @@ def main() -> int:
             time.sleep(1)
     return 0
 
+
+# Detached launches redirect stdout to files: force UTF-8 so prints
+# with non-ASCII never crash on cp1251/cp866 consoles (Python 3.10).
+if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 if __name__ == "__main__":
     raise SystemExit(main())

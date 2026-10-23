@@ -181,7 +181,7 @@ def main() -> int:
         "-device", "virtio-sound-pci,audiodev=audio",
     ]
 
-    print(f"QEMU headless · console → {serial_log} (TCP 127.0.0.1:{CONSOLE_PORT})")
+    print(f"QEMU headless · console -> {serial_log} (TCP 127.0.0.1:{CONSOLE_PORT})")
     print("SSH host:2222 · viewer http://127.0.0.1:8765/")
     print(f"initrd: {initrd.name} · audio: {audio_backend}")
 
@@ -204,6 +204,15 @@ def main() -> int:
             except OSError:
                 pass
 
+
+# Detached launches redirect stdout to files: force UTF-8 so prints
+# with non-ASCII never crash on cp1251/cp866 consoles (Python 3.10).
+if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 if __name__ == "__main__":
     sys.exit(main())

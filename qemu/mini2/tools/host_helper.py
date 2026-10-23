@@ -26,7 +26,7 @@ from pathlib import Path
 
 STAND = Path(__file__).resolve().parents[1]
 RUN = STAND / "run"
-REPO = STAND.parents[1]  # repo root (qemu/mini2 → repo)
+REPO = STAND.parents[1]  # repo root (qemu/mini2 -> repo)
 PEM_SOURCE = Path(os.environ.get("PEM_SOURCE_DIR") or (REPO / "keys"))
 MIC_PORT = 19093
 HTTP_PORT = 19094
@@ -48,7 +48,7 @@ def save() -> None:
 
 
 class MicSource:
-    """Capture thread → PCM chunks + RMS, independent of client connections."""
+    """Capture thread -> PCM chunks + RMS, independent of client connections."""
 
     def __init__(self) -> None:
         self.pcm: queue.Queue = queue.Queue(maxsize=32)
@@ -70,10 +70,10 @@ class MicSource:
             def callback(in_data, frame_count, time_info, status):
                 data = bytes(in_data)
                 if channels == 1:
-                    # mono device → duplicate samples into stereo frames
+                    # mono device -> duplicate samples into stereo frames
                     mono = data
                     data = b"".join(mono[i : i + 2] * 2 for i in range(0, len(mono), 2))
-                # stereo interleaved S16LE → RMS over all samples
+                # stereo interleaved S16LE -> RMS over all samples
                 count = len(data) // 2
                 if count:
                     acc = 0
@@ -140,7 +140,7 @@ def mic_server() -> None:
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     srv.bind(("127.0.0.1", MIC_PORT))
     srv.listen(8)
-    print(f"mic PCM server → 127.0.0.1:{MIC_PORT}", flush=True)
+    print(f"mic PCM server -> 127.0.0.1:{MIC_PORT}", flush=True)
 
     source = MicSource()
     source.thread.start()
@@ -230,10 +230,19 @@ def main() -> int:
     RUN.mkdir(parents=True, exist_ok=True)
     save()
     threading.Thread(target=mic_server, daemon=True).start()
-    print(f"helper HTTP → http://127.0.0.1:{HTTP_PORT}/epoch", flush=True)
+    print(f"helper HTTP -> http://127.0.0.1:{HTTP_PORT}/epoch", flush=True)
     Helper(("127.0.0.1", HTTP_PORT), Handler).serve_forever()
     return 0
 
+
+# Detached launches redirect stdout to files: force UTF-8 so prints
+# with non-ASCII never crash on cp1251/cp866 consoles (Python 3.10).
+if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 if __name__ == "__main__":
     sys.exit(main())

@@ -419,12 +419,21 @@ def main() -> None:
     ThreadingHTTPServer.allow_reuse_address = True
     httpd = ThreadingHTTPServer((HOST, PORT), Handler)
     httpd.daemon_threads = True
-    print(f"Mini 2 viewer → http://{HOST}:{PORT}/", flush=True)
+    print(f"Mini 2 viewer -> http://{HOST}:{PORT}/", flush=True)
     try:
         httpd.serve_forever(poll_interval=0.5)
     except KeyboardInterrupt:
         print("\nstop", flush=True)
 
+
+# Detached launches redirect stdout to files: force UTF-8 so prints
+# with non-ASCII never crash on cp1251/cp866 consoles (Python 3.10).
+if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 if __name__ == "__main__":
     main()

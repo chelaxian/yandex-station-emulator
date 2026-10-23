@@ -380,6 +380,15 @@ async def main():
         raise
 
 
+# Detached launches redirect stdout to files: force UTF-8 so prints
+# with non-ASCII never crash on cp1251/cp866 consoles (Python 3.10).
+if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 if __name__ == "__main__":
     try:
         asyncio.run(main())
