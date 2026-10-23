@@ -4,7 +4,8 @@
 с macOS (Apple Silicon) на Windows 10/11 x64. Основан на коммите `8369237`.
 
 > **Миди и выбор модели:** см. [`qemu/stand/README.md`](qemu/stand/README.md) — там же
-> общий лаунчер `--model mini|midi` и панель со сценой Миди.
+> общий лаунчер `--model mini|midi`, панель со сценой Миди и установка данных
+> (`python qemu\stand\tools\install_data_windows.py --model all`).
 
 ## Почему это не «просто скрипт»
 

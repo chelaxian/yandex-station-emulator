@@ -121,33 +121,63 @@ class Handler(BaseHTTPRequestHandler):
         with LOCK:
             if path == "/api/select":
                 model = body.get("model") or "mini"
-                ensure(model)
+                try:
+                    ensure(model)
+                except SystemExit as e:
+                    return self._json({"ok": False, "error": str(e)}, 500)
                 return self._json({"ok": True, **state()})
             if path == "/api/boot":
                 model = body.get("model") or "mini"
-                stand = ensure(model)
-                if not stand.alive():
-                    stand.start()
+                try:
+                    model_def = config.model(model)
+                except SystemExit as e:
+                    return self._json({"ok": False, "error": str(e)}, 400)
+                missing = [str(p) for p in config.missing(model_def)]
+                if missing:
+                    return self._json({
+                        "ok": False,
+                        "error": f"нет файлов модели «{model_def['short']}»",
+                        "missing": missing,
+                        "hint": config.install_command(model),
+                    }, 400)
+                try:
+                    stand = ensure(model)
+                except SystemExit as e:
+                    return self._json({"ok": False, "error": str(e)}, 500)
+                try:
+                    if not stand.alive():
+                        stand.start()
+                        LED.reset()
+                except RuntimeError as e:
+                    return self._json({"ok": False, "error": str(e)}, 500)
                 return self._json({"ok": True, **state()})
             if path == "/api/qemu":
                 stand = current()
                 action = (body.get("action") or "").lower()
                 if not stand:
                     return self._json({"ok": False, "error": "no model selected"}, 400)
-                if action == "stop":
-                    stand.stop()
-                elif action == "reboot":
-                    stand.reboot()
-                elif action == "clear":
-                    try:
-                        stand.console_log.write_text("")
-                    except OSError:
-                        pass
-                elif action == "boot":
-                    if not stand.alive():
-                        stand.start()
-                else:
-                    return self._json({"ok": False, "error": f"unknown action {action}"}, 400)
+                try:
+                    if action == "stop":
+                        stand.stop()
+                        LED.reset()
+                        if stand.alive():
+                            return self._json({"ok": False, "error": "QEMU не завершился"}, 500)
+                    elif action == "reboot":
+                        stand.reboot()
+                        LED.reset()
+                    elif action == "clear":
+                        try:
+                            stand.console_log.write_text("")
+                        except OSError:
+                            pass
+                    elif action == "boot":
+                        if not stand.alive():
+                            stand.start()
+                            LED.reset()
+                    else:
+                        return self._json({"ok": False, "error": f"unknown action {action}"}, 400)
+                except RuntimeError as e:
+                    return self._json({"ok": False, "error": str(e)}, 500)
                 return self._json({"ok": True, **state()})
         self.send_error(404)
 

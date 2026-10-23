@@ -134,13 +134,18 @@ function setService(name, value, fresh, model) {
 
 function applyFirmware() {
   const fw = led.firmware || {};
-  const fresh = Object.keys(fw).length > 0;
+  const hasData = Object.keys(fw).length > 0;
+  // The bridge stamps every report with a host receive time; after ~20 s
+  // without a new one the guest is considered silent, not healthy.
+  const fresh = state.up && !!led.firmware_fresh;
   for (const name of ["platformd", "mediad", "network", "bluetooth", "sound", "keymaster"]) {
-    setService(name, fw[name], fresh, state.model);
+    setService(name, fresh ? fw[name] : undefined, fresh, state.model);
   }
   const note = $("firmwareStatus");
   if (!state.up) note.textContent = "Станция выключена. Запустите её, чтобы проверить сервисы.";
-  else if (!fresh) note.textContent = "Ожидается отчёт из гостевой системы.";
+  else if (!fresh) note.textContent = hasData
+    ? "Отчёт из гостевой системы устарел — службы не обновляются."
+    : "Ожидается отчёт из гостевой системы.";
   else if (fw.platformd) note.textContent = "Службы Алисы запущены. Подключение из приложения ещё не готово.";
   else note.textContent = "Гостевая система работает. Службы Алисы запускаются.";
 
@@ -187,7 +192,10 @@ async function qemuAction(action) {
   busy = true;
   try {
     const j = await api("/api/qemu", { action });
-    if (!j.ok) throw Error(j.error || "Не удалось выполнить действие");
+    if (!j.ok) {
+      pushEvent("error", j.error || "Ошибка");
+      throw Error(j.hint ? `${j.error} — установите: ${j.hint}` : (j.error || "Не удалось выполнить действие"));
+    }
     if (action === "clear") { el.bootlog.textContent = ""; logText = ""; }
     toast({ boot: "Станция запускается", stop: "Станция выключена", reboot: "Станция перезапускается", clear: "Журнал очищен" }[action]);
     pushEvent("qemu", { boot: "Запуск", stop: "Остановка", reboot: "Перезапуск", clear: "Очистка журнала" }[action]);
@@ -224,8 +232,9 @@ async function pollLed() {
   try {
     led = await api("/api/led");
     if (state.model === "mini") {
-      applyRing(led.ring || []);
-      drawMiniClock(led.clock);
+      const live = state.up && !!led.led_fresh;
+      applyRing(live ? (led.ring || []) : []);
+      drawMiniClock(live ? led.clock : "");
     }
     applyFirmware();
   } catch {}

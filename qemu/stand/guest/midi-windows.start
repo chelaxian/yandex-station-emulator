@@ -78,12 +78,26 @@ echo 'MIDI: rootfs mounted; starting Quasar'
 chroot /midi /system/vendor/quasar/onboot.sh start >/midi/tmp/midi-onboot.log 2>&1 &
 echo $! >/run/midi-onboot.pid
 
+# Service detection reads /proc/<pid>/cmdline instead of `ps | grep`:
+# the grep process carries the pattern in its own argv, so a pipeline found
+# itself and the panel reported services that were not actually running.
+maind_runs() {
+  for file in /proc/[0-9]*/cmdline; do
+    [ -r "$file" ] || continue
+    cmd=$(tr '\000' ' ' <"$file" 2>/dev/null) || continue
+    case "$cmd" in
+      *"maind $1 "*) return 0 ;;
+    esac
+  done
+  return 1
+}
+
 # firmware status for the panel (same JSON shape as Mini 2) over TCP 19095
 (
   while true; do
-    plat=false; if ps | grep -q 'maind --platformd'; then plat=true; fi
-    med=false; if ps | grep -q 'maind --mediad'; then med=true; fi
-    tel=false; if ps | grep -q 'maind --telemetry'; then tel=true; fi
+    plat=false; if maind_runs --platformd; then plat=true; fi
+    med=false; if maind_runs --mediad; then med=true; fi
+    tel=false; if maind_runs --telemetry; then tel=true; fi
     snd=false; if [ -c /dev/snd/pcmC0D0p ]; then snd=true; fi
     bt=false; if [ -e /sys/class/bluetooth/hci0 ]; then bt=true; fi
     net=false; if ip route 2>/dev/null | grep -q '^default '; then net=true; fi
