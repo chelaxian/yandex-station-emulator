@@ -39,13 +39,26 @@ if (-not $qemu) {
         if (Test-Path $c) { $qemu = $c; break }
     }
 }
+$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
+            ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $qemu) {
+    if (-not $isAdmin) {
+        Write-Warning "Установщику QEMU нужны права администратора (он ставится в Program Files)."
+        Write-Warning "Открой PowerShell от имени администратора и запусти setup_windows.ps1 ещё раз."
+    }
     Write-Host "[setup] installing QEMU via winget (SoftwareFreedomConservancy.QEMU)…"
     winget install --id SoftwareFreedomConservancy.QEMU --exact --accept-package-agreements --accept-source-agreements
     $env:Path += ";C:\Program Files\qemu"
     $qemu = Get-Command qemu-system-aarch64.exe -ErrorAction SilentlyContinue
     if (-not $qemu -and (Test-Path "C:\Program Files\qemu\qemu-system-aarch64.exe")) { $qemu = "C:\Program Files\qemu\qemu-system-aarch64.exe" }
-    if (-not $qemu) { throw "QEMU install failed. Install from https://qemu.weilnetz.de/w64/ and re-run." }
+    if (-not $qemu) {
+        Write-Warning "QEMU не установился (winget exit code 2 = нет прав администратора)."
+        Write-Warning "Варианты:"
+        Write-Warning "  1) Запусти PowerShell от имени АДМИНИСТРАТОРА и повтори этот скрипт"
+        Write-Warning "  2) Или скачай установщик с https://qemu.weilnetz.de/w64/ и запусти вручную (с правами админа),"
+        Write-Warning "     затем перезапусти PowerShell и повтори этот скрипт"
+        throw "QEMU install failed — нужен запуск с правами администратора"
+    }
 }
 Write-Host "[setup] QEMU: $qemu"
 
