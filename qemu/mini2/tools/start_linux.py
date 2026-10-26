@@ -10,7 +10,7 @@ import subprocess
 from prepare_linux import STAND, prepare
 
 
-def arguments(adb_port=5556, glagol_port=8444, audio='none', ssh_port=2223):
+def arguments(adb_port=5556, glagol_port=8444, audio='none', ssh_port=2223, lan=False):
     root = STAND / 'alpine_root-linux'
     run = STAND / 'run-linux'
     args = [
@@ -24,7 +24,7 @@ def arguments(adb_port=5556, glagol_port=8444, audio='none', ssh_port=2223):
         '-drive', f'file={STAND / "mini2-backup.ext4"},format=raw,if=none,id=firmware',
         '-device', 'virtio-blk-pci,drive=firmware',
         '-netdev', f'user,id=n0,hostfwd=tcp:127.0.0.1:{adb_port}-:5555,hostfwd=tcp:127.0.0.1:{glagol_port}-:443,hostfwd=tcp:127.0.0.1:{ssh_port}-:22',
-        '-device', 'virtio-net-device,netdev=n0,mac=52:54:00:4d:32:01',
+        '-device', 'virtio-net-device,netdev=n0,mac=' + ('52:54:00:4d:32:02' if lan else '52:54:00:4d:32:01'),
         '-audiodev', f'{audio},id=audio',
         '-device', 'virtio-sound-pci,audiodev=audio',
     ]
@@ -38,18 +38,21 @@ def arguments(adb_port=5556, glagol_port=8444, audio='none', ssh_port=2223):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--print-proxmox-args', action='store_true', help='JSON array of extra arguments; caller supplies machine/CPU/RAM')
+    parser.add_argument('--proxmox-lan', action='store_true', help='Private control NIC; caller must supply a bridged NIC with MAC 52:54:00:4d:32:01 and configure guest LAN mode')
     parser.add_argument('--adb-port', type=int, default=5556)
     parser.add_argument('--glagol-port', type=int, default=8444)
     parser.add_argument('--ssh-port', type=int, default=2223)
     parser.add_argument('--audio', choices=('none', 'pa', 'alsa'), default='none')
     opts = parser.parse_args()
+    if opts.proxmox_lan and not opts.print_proxmox_args:
+        parser.error('--proxmox-lan requires --print-proxmox-args and an externally managed bridged NIC')
     for port in (opts.adb_port, opts.glagol_port, opts.ssh_port):
         if not 1024 <= port <= 65535:
             parser.error('Use unprivileged TCP ports 1024–65535')
     if len({opts.adb_port, opts.glagol_port, opts.ssh_port}) != 3:
         parser.error('Management ports must be different')
     if opts.print_proxmox_args:
-        print(json.dumps(arguments(opts.adb_port, opts.glagol_port, opts.audio, opts.ssh_port)))
+        print(json.dumps(arguments(opts.adb_port, opts.glagol_port, opts.audio, opts.ssh_port, opts.proxmox_lan)))
         return
     qemu = shutil.which(os.environ.get('QEMU', 'qemu-system-aarch64'))
     if not qemu:

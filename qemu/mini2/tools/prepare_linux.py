@@ -18,7 +18,9 @@ def prepare():
     run = STAND / 'run-linux'
     run.mkdir(mode=0o700, exist_ok=True)
     (root / 'opt/mini2/host_epoch').write_text(str(int(time.time())))
-    (root / 'opt/mini2/network_mode').write_text('nat\n')
+    mode = root / 'opt/mini2/network_mode'
+    if not mode.exists():
+        mode.write_text('nat\n')
     keys = Path(os.environ.get('PEM_SOURCE_DIR', str(STAND.parents[1] / 'keys')))
     staged = root / 'opt/mini2/pem-keys'
     staged.mkdir(mode=0o700, exist_ok=True)
@@ -41,6 +43,11 @@ dd if=/dev/zero of=/mini2/tmp/mac-microphone.pcm bs=4096 >/tmp/silent-mic.log 2>
 # A separate shell does not inherit this bootstrap's errexit setting.
 /bin/sh /opt/mini2/adb-linux-watch.sh &
 echo $! >/run/mini2-adb-watch.pid
+if [ "$(cat /opt/mini2/network_mode)" = lan ] && [ -x /opt/mini2/wpa-lan-proxy ]; then
+    sed -i 's@ctrl_interface=/var/run/wpa_supplicant@ctrl_interface=/var/run/wpa-lan-backend@' /mini2/emulator/wpa-wired.conf
+    /bin/sh /opt/mini2/wpa-lan-watch.sh >/tmp/wpa-lan-proxy.log 2>&1 &
+    echo $! >/run/mini2-wpa-watch.pid
+fi
 '''
     script = script.replace(marker, extra + '\n' + marker)
     target = root / 'etc/local.d/mini2.start'
@@ -49,6 +56,11 @@ echo $! >/run/mini2-adb-watch.pid
     watcher = root / 'opt/mini2/adb-linux-watch.sh'
     shutil.copyfile(STAND / 'guest/adb-linux-watch.sh', watcher)
     watcher.chmod(0o755)
+    shutil.copyfile(STAND / 'guest/wpa-lan-watch.sh', root / 'opt/mini2/wpa-lan-watch.sh')
+    proxy_binary = os.environ.get('LINUX_LAN_PROXY_BINARY')
+    if proxy_binary:
+        shutil.copyfile(proxy_binary, root / 'opt/mini2/wpa-lan-proxy')
+        (root / 'opt/mini2/wpa-lan-proxy').chmod(0o755)
     # Optional SSH uses a user-supplied static ARM binary and public key only.
     binary = os.environ.get('LINUX_DROPBEAR_BINARY')
     public_key = os.environ.get('LINUX_AUTHORIZED_KEYS')
@@ -69,6 +81,14 @@ chmod 755 /mini2/bkupgrade/data/local/owner-ssh/dropbear
 chroot /mini2 /data/local/owner-ssh/dropbear -R -s -j -k -p 22 -P /tmp/owner-dropbear.pid
 '''
         target.write_text(script)
+    script += '''
+# Optional, data-only YAM bootstrap. Do not follow /mini2/data outside chroot.
+touch /mini2/emulator/yam-autostart-supported
+if [ -f /mini2/bkupgrade/data/local/yam/autostart ] && [ -x /mini2/bkupgrade/data/local/yam/start.sh ]; then
+    chroot /mini2 /data/local/yam/start.sh >/mini2/tmp/yam-autostart.log 2>&1 || true
+fi
+'''
+    target.write_text(script)
     leds = STAND / 'led_sysfs-linux'
     if not leds.exists():
         import subprocess
