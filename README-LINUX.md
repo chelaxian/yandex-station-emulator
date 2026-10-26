@@ -108,8 +108,10 @@ qm set 900 --onboot 1
 
 Это необязательный адаптер для отдельного проекта dimap/yandex-station-web.
 Сохраните его `profiles.py` и JSON конфигурации перед изменениями.
-Скопируйте `integrations/yandex_station_web/mini2_profile.py` рядом с
-`profiles.py`, затем добавьте в конец `profiles.py`:
+Скопируйте `mini2_profile.py`, `mini2_yam.py` и `mini2_display.py` из
+`integrations/yandex_station_web/` рядом с `profiles.py`, затем добавьте в конец `profiles.py`:
+
+YAM и дисплей: [возможности и ограничения адаптера](integrations/yandex_station_web/README.md).
 
 ```python
 from mini2_profile import register

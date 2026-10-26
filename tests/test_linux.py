@@ -14,6 +14,7 @@ from unittest.mock import patch
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / 'qemu/mini2/tools'))
+sys.path.insert(0, str(REPO / 'integrations/yandex_station_web'))
 from start_linux import arguments
 
 

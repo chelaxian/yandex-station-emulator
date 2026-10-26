@@ -11,14 +11,20 @@ import time
 def register(namespace):
     namespace['PROFILES']['mini2'] = dict(
         name='Станция Мини 2 (виртуальная)', platform='mini2',
-        clock=False, boot=False, alarms=False, light=True, experimental=True,
+        clock=True, boot=False, alarms=False, light=True, experimental=True,
     )
     original = namespace['install']
 
     def install(server, model='lite2', auto=False):
+        base_methods = {name: getattr(server.Panel, name) for name in ('display_status', 'clock_frames') if hasattr(server.Panel, name)}
         original(server, model, auto)
         if model != 'mini2':
             return
+        import mini2_yam
+        mini2_yam.install(server)
+        if base_methods:
+            import mini2_display
+            mini2_display.install(server, base_methods)
         original_shell = server.Adb.shell
 
         def serialized_shell(self, command, timeout=15, check=True):
