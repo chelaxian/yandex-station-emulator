@@ -27,7 +27,6 @@ class Mirror(dbus.service.Object):
         self.object_path = str(path)
         self.interface = interface
         self.properties = dict(properties)
-        self.properties.pop('Handle', None)
         if interface == CHAR and 'read' not in self.properties.get('Flags', []):
             self.properties.pop('Value', None)
         self.remote = guest.get_object(DEST, path)
@@ -36,7 +35,9 @@ class Mirror(dbus.service.Object):
     def call_remote(self, method, *args):
         try:
             return self.remote.get_dbus_method(method, CHAR)(*args, timeout=30)
-        except dbus.DBusException:
+        except dbus.DBusException as error:
+            logging.warning('GATT %s %s failed: %s', self.object_path.rsplit('/', 1)[-1],
+                            method, error.get_dbus_name())
             # Firmware errors may include Wi-Fi or account payloads.
             raise dbus.DBusException('Firmware operation failed',
                                     name='org.bluez.Error.Failed') from None
@@ -75,12 +76,14 @@ class Mirror(dbus.service.Object):
 
     @dbus.service.method(CHAR, in_signature='', out_signature='')
     def StartNotify(self):
+        logging.info('GATT notify start %s', self.object_path.rsplit('/', 1)[-1])
         if not self.notifying:
             self.call_remote('StartNotify')
             self.notifying = True
 
     @dbus.service.method(CHAR, in_signature='', out_signature='')
     def StopNotify(self):
+        logging.info('GATT notify stop %s', self.object_path.rsplit('/', 1)[-1])
         if self.notifying:
             self.call_remote('StopNotify')
             self.notifying = False
@@ -102,6 +105,11 @@ class Application(dbus.service.Object):
         for path, interfaces in objects.items():
             for interface, properties in interfaces.items():
                 if interface in (SERVICE, CHAR):
+                    # Stable ATT handles prevent stale iOS caches after a bridge
+                    # reconnect. Reserve a range beyond built-in host services.
+                    offsets = [2, 4, 6, 8, 11, 13]
+                    offset = 0 if interface == SERVICE else offsets[int(str(path).rsplit('char', 1)[1])]
+                    properties['Handle'] = dbus.UInt16(0x100 + offset)
                     self.objects[str(path)] = Mirror(host, guest, path, interface, properties)
         path = '/ru/yandex/quasar/advertising'
         props = guest.get_object(DEST, path).GetAll(ADV, dbus_interface=PROPS)
@@ -128,14 +136,16 @@ def main():
     parser.add_argument('--guest-bus-port', type=int, default=15557)
     parser.add_argument('--adapter', default='/org/bluez/hci0')
     parser.add_argument('--adb-device', default='127.0.0.1:5556')
+    parser.add_argument('--direct-guest-bus', action='store_true', help='Use a private QEMU-forwarded control bus, independently of ADB')
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
     DBusGMainLoop(set_as_default=True)
-    subprocess.run(['adb', 'connect', args.adb_device], check=True, timeout=15,
-                   stdout=subprocess.DEVNULL)
-    subprocess.run(['adb', '-s', args.adb_device, 'forward',
-                    f'tcp:{args.guest_bus_port}',
-                    'localfilesystem:/run/dbus/system_bus_socket'], check=True)
+    if not args.direct_guest_bus:
+        subprocess.run(['adb', 'connect', args.adb_device], check=True, timeout=15,
+                       stdout=subprocess.DEVNULL)
+        subprocess.run(['adb', '-s', args.adb_device, 'forward',
+                        f'tcp:{args.guest_bus_port}',
+                        'localfilesystem:/run/dbus/system_bus_socket'], check=True)
     guest = dbus.bus.BusConnection(f'tcp:host=127.0.0.1,port={args.guest_bus_port}')
     host = dbus.SystemBus()
     adapter = host.get_object('org.bluez', args.adapter)

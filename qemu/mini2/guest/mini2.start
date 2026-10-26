@@ -73,7 +73,7 @@ if [ "$(cat /opt/mini2/network_mode 2>/dev/null)" = lan ]; then
     ip route add default via 10.0.2.2 dev "$control_if" table 128
     ip rule add from 10.0.2.15/32 table 128
     # Root management stays on the private control transport.
-    for port in 22 5555 8099; do
+    for port in 22 5555 8099 15558; do
         iptables -I INPUT -i wlan0 -p tcp --dport "$port" -j DROP
     done
     udhcpc -i wlan0 -b -t 5 -s /opt/mini2/lan-dhcp.sh

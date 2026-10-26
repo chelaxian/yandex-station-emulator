@@ -18,6 +18,8 @@ extern int EVP_DigestSign(EVP_MD_CTX*,unsigned char*,size_t*,const unsigned char
 extern void *EVP_PKEY_get1_RSA(EVP_PKEY*);
 extern int RSA_private_decrypt(int,const unsigned char*,unsigned char*,void*,int);
 extern void RSA_free(void*);
+extern int RSA_padding_check_PKCS1_OAEP_mgf1(unsigned char*,int,const unsigned char*,int,int,const unsigned char*,int,const void*,const void*);
+extern const void *EVP_sha1(void);
 extern void *fopen(const char*,const char*);
 extern unsigned fread(void*,unsigned,unsigned,void*);
 extern int fclose(void*);
@@ -50,7 +52,26 @@ int main(int argc,char **argv,char **env){
      if(field==1){size_t sig_size=sizeof(result);EVP_MD_CTX *ctx=EVP_MD_CTX_new();
       ok=ctx&&EVP_DigestSignInit(ctx,0,EVP_sha256(),0,key)==1&&EVP_DigestSign(ctx,result,&sig_size,request+j,size)==1;
       result_size=sig_size;EVP_MD_CTX_free(ctx);
-     }else{void *rsa=EVP_PKEY_get1_RSA(key);int got=rsa?RSA_private_decrypt(size,request+j,result,rsa,1):-1;RSA_free(rsa);if(got>=0){ok=1;result_size=got;}}
+     }else{
+      void *rsa=EVP_PKEY_get1_RSA(key);
+      int got=rsa?RSA_private_decrypt(size,request+j,result,rsa,1):-1;
+      if(got<0&&rsa){
+       /* Accept standard OAEP variants; never accept unpadded plaintext. */
+       unsigned char raw[8192];
+       int raw_size=size<=sizeof(raw)?RSA_private_decrypt(size,request+j,raw,rsa,3):-1;
+       if(raw_size>0){
+        got=RSA_padding_check_PKCS1_OAEP_mgf1(result,sizeof(result),raw,raw_size,raw_size,0,0,EVP_sha1(),EVP_sha1());
+        if(got>=0)puts("decrypt padding=OAEP-SHA1");
+        else {
+         got=RSA_padding_check_PKCS1_OAEP_mgf1(result,sizeof(result),raw,raw_size,raw_size,0,0,EVP_sha256(),EVP_sha256());
+         if(got>=0)puts("decrypt padding=OAEP-SHA256");
+        }
+       }
+       memset(raw,0,sizeof(raw));
+      }
+      printf("decrypt input_bytes=%u valid_padding=%d\n",size,got>=0);
+      RSA_free(rsa);if(got>=0){ok=1;result_size=got;}
+     }
     }
    }
    if(ok){unsigned k=bytes(nested,1,result,result_size);out_size=bytes(response,field+1,nested,k);}

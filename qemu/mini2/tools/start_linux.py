@@ -10,7 +10,7 @@ import subprocess
 from prepare_linux import STAND, prepare
 
 
-def arguments(adb_port=5556, glagol_port=8444, audio='none', ssh_port=2223, lan=False):
+def arguments(adb_port=5556, glagol_port=8444, audio='none', ssh_port=2223, lan=False, bus_port=None):
     root = STAND / 'alpine_root-linux'
     run = STAND / 'run-linux'
     args = [
@@ -28,6 +28,9 @@ def arguments(adb_port=5556, glagol_port=8444, audio='none', ssh_port=2223, lan=
         '-audiodev', f'{audio},id=audio',
         '-device', 'virtio-sound-pci,audiodev=audio',
     ]
+    if bus_port is not None:
+        pos = args.index('-netdev') + 1
+        args[pos] += f',hostfwd=tcp:127.0.0.1:{bus_port}-:15558'
     nv = STAND.parents[1] / 'firmware/backups/yandex-mini2-backup/mtd/mtd4_nv.bin'
     if nv.is_file():
         args += ['-drive', f'file={nv},format=raw,if=none,id=nv,readonly=on', '-device', 'virtio-blk-pci,drive=nv']
@@ -42,17 +45,21 @@ def main():
     parser.add_argument('--adb-port', type=int, default=5556)
     parser.add_argument('--glagol-port', type=int, default=8444)
     parser.add_argument('--ssh-port', type=int, default=2223)
+    parser.add_argument('--bus-port', type=int, help='Optional private D-Bus forward independent of ADB; requires guest dbus-control-forward')
     parser.add_argument('--audio', choices=('none', 'pa', 'alsa'), default='none')
     opts = parser.parse_args()
     if opts.proxmox_lan and not opts.print_proxmox_args:
         parser.error('--proxmox-lan requires --print-proxmox-args and an externally managed bridged NIC')
-    for port in (opts.adb_port, opts.glagol_port, opts.ssh_port):
+    ports = [opts.adb_port, opts.glagol_port, opts.ssh_port]
+    if opts.bus_port is not None:
+        ports.append(opts.bus_port)
+    for port in ports:
         if not 1024 <= port <= 65535:
             parser.error('Use unprivileged TCP ports 1024–65535')
-    if len({opts.adb_port, opts.glagol_port, opts.ssh_port}) != 3:
+    if len(set(ports)) != len(ports):
         parser.error('Management ports must be different')
     if opts.print_proxmox_args:
-        print(json.dumps(arguments(opts.adb_port, opts.glagol_port, opts.audio, opts.ssh_port, opts.proxmox_lan)))
+        print(json.dumps(arguments(opts.adb_port, opts.glagol_port, opts.audio, opts.ssh_port, opts.proxmox_lan, opts.bus_port)))
         return
     qemu = shutil.which(os.environ.get('QEMU', 'qemu-system-aarch64'))
     if not qemu:
@@ -67,7 +74,7 @@ def main():
             raise SystemExit('Linux stand is already running')
         prepare()
         command = [qemu, '-M', 'virt', '-accel', 'tcg', '-cpu', 'cortex-a53', '-smp', '4', '-m', '1024', '-display', 'none', '-monitor', 'none']
-        result = subprocess.run(command + arguments(opts.adb_port, opts.glagol_port, opts.audio, opts.ssh_port))
+        result = subprocess.run(command + arguments(opts.adb_port, opts.glagol_port, opts.audio, opts.ssh_port, bus_port=opts.bus_port))
         raise SystemExit(result.returncode)
 
 

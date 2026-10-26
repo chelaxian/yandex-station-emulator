@@ -43,6 +43,9 @@ dd if=/dev/zero of=/mini2/tmp/mac-microphone.pcm bs=4096 >/tmp/silent-mic.log 2>
 # A separate shell does not inherit this bootstrap's errexit setting.
 /bin/sh /opt/mini2/adb-linux-watch.sh &
 echo $! >/run/mini2-adb-watch.pid
+if [ -x /opt/mini2/dbus-control-forward ]; then
+    /bin/sh /opt/mini2/dbus-control-watch.sh >/tmp/dbus-control-forward.log 2>&1 &
+fi
 if [ "$(cat /opt/mini2/network_mode)" = lan ] && [ -x /opt/mini2/wpa-lan-proxy ]; then
     sed -i 's@ctrl_interface=/var/run/wpa_supplicant@ctrl_interface=/var/run/wpa-lan-backend@' /mini2/emulator/wpa-wired.conf
     /bin/sh /opt/mini2/wpa-lan-watch.sh >/tmp/wpa-lan-proxy.log 2>&1 &
@@ -57,6 +60,11 @@ fi
     shutil.copyfile(STAND / 'guest/adb-linux-watch.sh', watcher)
     watcher.chmod(0o755)
     shutil.copyfile(STAND / 'guest/wpa-lan-watch.sh', root / 'opt/mini2/wpa-lan-watch.sh')
+    shutil.copyfile(STAND / 'guest/dbus-control-watch.sh', root / 'opt/mini2/dbus-control-watch.sh')
+    bus_binary = os.environ.get('LINUX_DBUS_FORWARD_BINARY')
+    if bus_binary:
+        shutil.copyfile(bus_binary, root / 'opt/mini2/dbus-control-forward')
+        (root / 'opt/mini2/dbus-control-forward').chmod(0o755)
     proxy_binary = os.environ.get('LINUX_LAN_PROXY_BINARY')
     if proxy_binary:
         shutil.copyfile(proxy_binary, root / 'opt/mini2/wpa-lan-proxy')
