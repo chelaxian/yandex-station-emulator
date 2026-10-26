@@ -38,18 +38,17 @@ def prepare():
     extra = '''
 mkfifo /mini2/tmp/mac-microphone.pcm
 dd if=/dev/zero of=/mini2/tmp/mac-microphone.pcm bs=4096 >/tmp/silent-mic.log 2>&1 &
-# ADB is confined to the host loopback forwarding in start_linux.py.
-(
-    while true; do
-        chroot /mini2 /usr/bin/adbd >/mini2/tmp/adbd.log 2>&1
-        sleep 2
-    done
-) &
+# A separate shell does not inherit this bootstrap's errexit setting.
+/bin/sh /opt/mini2/adb-linux-watch.sh &
+echo $! >/run/mini2-adb-watch.pid
 '''
     script = script.replace(marker, extra + '\n' + marker)
     target = root / 'etc/local.d/mini2.start'
     target.write_text(script)
     target.chmod(0o755)
+    watcher = root / 'opt/mini2/adb-linux-watch.sh'
+    shutil.copyfile(STAND / 'guest/adb-linux-watch.sh', watcher)
+    watcher.chmod(0o755)
     # Optional SSH uses a user-supplied static ARM binary and public key only.
     binary = os.environ.get('LINUX_DROPBEAR_BINARY')
     public_key = os.environ.get('LINUX_AUTHORIZED_KEYS')

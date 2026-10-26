@@ -4,6 +4,8 @@ Copy beside profiles.py, then append `from mini2_profile import register;
 register(globals())` to profiles.py. Does not replace existing model profiles.
 """
 import shlex
+import threading
+import time
 
 
 def register(namespace):
@@ -17,6 +19,17 @@ def register(namespace):
         original(server, model, auto)
         if model != 'mini2':
             return
+        original_shell = server.Adb.shell
+
+        def serialized_shell(self, command, timeout=15, check=True):
+            # This legacy ARM32 daemon is shared by all requests in its worker.
+            # Keep concurrent tabs from opening overlapping shell sessions.
+            with self.lock:
+                return original_shell(self, command, timeout=timeout, check=check)
+
+        server.Adb.shell = serialized_shell
+        snapshot_lock = threading.Lock()
+        snapshot = {'adb': None, 'at': 0, 'value': None}
         ring_names = [f'mini2:{color}:ring{i}' for i in range(1, 7) for color in ('red', 'green', 'blue')]
         # Map the Mini 2 seven-segment display to the panel's eight-segment slots.
         clock_names = [f'mini2:white:clock{segment}{digit}' for digit in range(1, 5) for segment in 'ABCDEFG']
@@ -39,14 +52,22 @@ def register(namespace):
             rings = [values[28+i*3:31+i*3] for i in range(6)]
             return {'v': clock, 'ring': rings[::2], 'ring_all': rings}
 
-        server.Panel.clock_state = leds
+        def cached_leds(self):
+            # Share one snapshot between the direct clock API and LED stream.
+            with snapshot_lock:
+                if snapshot['adb'] is not self.adb or time.monotonic() - snapshot['at'] >= 1:
+                    value = leds(self)
+                    snapshot.update(adb=self.adb, at=time.monotonic(), value=value)
+                return snapshot['value']
+
+        server.Panel.clock_state = cached_leds
 
         class LedStream:
             def __init__(self, adb):
                 self.adb = adb
 
             def get(self):
-                return leds(self)
+                return cached_leds(self)
 
         server.LedStream = LedStream
 
