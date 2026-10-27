@@ -69,6 +69,10 @@ fi
     if proxy_binary:
         shutil.copyfile(proxy_binary, root / 'opt/mini2/wpa-lan-proxy')
         (root / 'opt/mini2/wpa-lan-proxy').chmod(0o755)
+    pem_binary = os.environ.get('LINUX_PEM_PROXY_BINARY')
+    if pem_binary:
+        shutil.copyfile(pem_binary, root / 'opt/mini2/pem_proxy')
+        (root / 'opt/mini2/pem_proxy').chmod(0o755)
     # Optional SSH uses a user-supplied static ARM binary and public key only.
     binary = os.environ.get('LINUX_DROPBEAR_BINARY')
     public_key = os.environ.get('LINUX_AUTHORIZED_KEYS')
